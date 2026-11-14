@@ -1,0 +1,87 @@
+# 天文台サーバーの設定。相対パスはプロジェクトのルートから解決する
+[server]
+host = "0.0.0.0"
+port = 8080
+webrtc_port = 8889
+mediamtx_api = "http://127.0.0.1:9997"
+state_file = "var/state.json"
+# HTTPS の証明書（tools/make_cert.sh で作る）。消すと HTTP で動く
+tls_cert = "var/tls/cert.pem"
+tls_key = "var/tls/key.pem"
+
+# 観測地の初期値（SynScan の既定値）。画面から保存すると var/state.json の値が優先される
+[site]
+latitude = 35.7333
+longitude = 139.75
+elevation_m = 0.0
+
+[camera]
+device = "/dev/v4l/by-id/usb-SVBONY_SV205_SVBONY_SV205_200901010001-video-index0"
+
+# ファインダーの ELP。露出の上限 5000 は v4l2 の申告値で、0.5 秒まで延びるかは未確認（30fps のまま明るくなる）
+[finder]
+device = "/dev/v4l/by-id/usb-H264_USB_Camera_H264_USB_Camera_2020032801-video-index0"
+exposure_range = [1, 5000]
+gain_range = [0, 100]
+
+[capture]
+root = "captures"
+preview_dir = "var/preview"
+rtsp_url = "rtsp://127.0.0.1:8554/camera"
+render_device = "/dev/dri/renderD128"
+# これを切ると撮影を止める
+min_free_gb = 10
+# 1080p、30fps の YUYV の実測値（2026-11-01）。開始時の空き容量の判定に使う
+video_mb_per_second = 125
+video_default_seconds = 120
+video_max_seconds = 900
+timelapse_min_interval = 5
+stall_seconds = 10
+settle_seconds = 1.0
+still_timeout = 15
+stop_timeout = 10
+
+[mount]
+# auto は /dev/serial/by-id から探す
+port = "auto"
+max_rate = 9
+az_limit = 180.0
+alt_limit = 90.0
+# 1 回の操作（同じ向きに押し続けている間）の上限。速度と時間からの見積もりで判定する。
+# 止まったらスティックを一度離さないと、同じ向きには動かない
+max_move_deg = 45.0
+max_move_seconds = 120.0
+# 読み取りがこれ（+ 4°/秒 × 読み取りの間隔）を超えて飛んだら全軸を止める。高度 ±90° での裏返りは除く
+jump_deg = 5.0
+
+# 反転時の早回し。amount は度で、推定値より控えめにしている。speeds は速度ごとの実測値（度/秒）で、
+# tools/measure_rates.py で測った方位の値（2026-11-01）。高度の読み取りは位置により方位の約半分になるが、
+# 映像ではどの高度でも速度 3 で約 1.9'/秒なので、高度にも同じ値を使う
+[mount.backlash]
+enabled = true
+
+[mount.backlash.speeds]
+1 = 0.0018
+2 = 0.0083
+3 = 0.036
+4 = 0.0722
+5 = 0.146
+6 = 0.292
+# 9 は 2026-11-07 の高度 ±24° の往復で、読み取りから測った値。7、8 は未測定
+9 = 2.41
+
+# 方位は読み取りと映像の比が約 1.00 なので、読み取りで隙間を追う
+[mount.backlash.az]
+amount = 0.2
+rate = 6
+source = "encoder"
+lead = 0.3
+start_delay = 0.0
+
+# 高度は読み取りが信頼できないので、速度と時間で隙間を追う
+[mount.backlash.alt]
+amount = 0.098
+rate = 5
+source = "time"
+lead = 0.48
+start_delay = 0.4

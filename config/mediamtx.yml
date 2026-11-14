@@ -1,0 +1,62 @@
+# 同じ LAN のブラウザへ WebRTC で配信する。FFmpeg は撮影と共有するので observatory サーバー（capture.py）が起動する。
+# 起動: bin/mediamtx config/mediamtx.yml（未指定の項目は MediaMTX の既定値になる）
+logLevel: info
+logDestinations: [stdout]
+
+# 視聴は LAN 内の誰でも可能。映像の送り込みはホスト自身の ffmpeg に限る
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: read
+        path:
+  - user: any
+    pass:
+    ips: [127.0.0.1/32]
+    permissions:
+      - action: publish
+        path: camera
+      - action: publish
+        path: finder
+      - action: api
+
+# カメラの状態をサーバーから確かめるための API。ホストの外には開かない
+api: true
+apiAddress: 127.0.0.1:9997
+
+# RTSP は ffmpeg からの受け取り専用で、外には開かない
+rtsp: true
+rtspTransports: [tcp]
+rtspAddress: 127.0.0.1:8554
+rtmp: false
+hls: false
+srt: false
+moq: false
+
+webrtc: true
+# WHEP は天文台サーバーが中継するので、ローカルだけで待ち受ける
+webrtcAddress: 127.0.0.1:8889
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcAllowOrigins: ["*"]
+
+paths:
+  camera:
+    source: publisher
+  # ファインダーのカメラ（H264 USB Camera、32e4:9422。以前は C270）。撮影には使わないので MediaMTX が直接 FFmpeg を起動し、落ちたら起動し直す。
+  # ブラウザでは http://<ホスト>:8889/finder/ で単独でも見られる
+  finder:
+    source: publisher
+    runOnInit: >-
+      ffmpeg -nostdin -hide_banner -loglevel warning
+      -hwaccel vaapi -hwaccel_device /dev/dri/renderD128 -hwaccel_output_format vaapi
+      -fflags nobuffer -flags low_delay
+      -f v4l2 -input_format mjpeg -video_size 1920x1080
+      -i /dev/v4l/by-id/usb-H264_USB_Camera_H264_USB_Camera_2020032801-video-index0
+      -map 0:v -vf scale_vaapi=format=nv12
+      -c:v h264_vaapi -profile:v constrained_baseline -bf 0 -g 30
+      -rc_mode VBR -b:v 3M -maxrate 5M -async_depth 1
+      -f rtsp -rtsp_transport tcp -pkt_size 1200 rtsp://127.0.0.1:8554/finder
+    runOnInitRestart: yes

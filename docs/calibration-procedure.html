@@ -1,0 +1,432 @@
+<title>SE-AT90M 観測前キャリブレーション</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Old+Mincho:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: 夜の観測で読む手順書。暗い面が基本、赤は夜目を守る色として注意と番号だけに使う。1 段組、手順は縦に並ぶ */
+:root {
+  --bg: #0f1216; --panel: #161b21; --line: #2a323c; --fg: #dfe4ea; --muted: #8e99a6;
+  --accent: #e0574f; --accent-soft: rgba(224, 87, 79, .12); --ok: #6fbf8e; --ok-soft: rgba(111, 191, 142, .10);
+  --font-display: "Zen Old Mincho", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f6f7f8; --panel: #ffffff; --line: #d9dee4; --fg: #1b2026; --muted: #5d6874;
+  --accent: #b8322b; --accent-soft: rgba(184, 50, 43, .08); --ok: #2f7a4f; --ok-soft: rgba(47, 122, 79, .08); color-scheme: light } }
+:root[data-theme="light"] {
+  --bg: #f6f7f8; --panel: #ffffff; --line: #d9dee4; --fg: #1b2026; --muted: #5d6874;
+  --accent: #b8322b; --accent-soft: rgba(184, 50, 43, .08); --ok: #2f7a4f; --ok-soft: rgba(47, 122, 79, .08); color-scheme: light }
+
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.8; }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 40px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; line-height: 1.35; margin: 0; }
+h1 { font-size: 30px; }
+h2 { font-size: 22px; }
+h3 { font-size: 17px; margin: 0; line-height: 1.5; }
+p { margin: 0; }
+ul, ol { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
+code, .num { font-family: var(--font-mono); font-size: .9em; font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 12px; letter-spacing: .12em; color: var(--muted); }
+.muted { color: var(--muted); }
+header { display: grid; gap: 12px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13px; color: var(--muted); }
+
+.flow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flow > div { border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; background: var(--panel); min-width: 0; }
+.flow ol { font-size: 14px; }
+@media (max-width: 560px) { .flow { grid-template-columns: 1fr; } }
+
+section { display: grid; gap: 18px; }
+.phase { border-top: 1px solid var(--line); padding-top: 20px; display: grid; gap: 6px; }
+.step { display: grid; grid-template-columns: 44px 1fr; gap: 0 14px; }
+.step-no { font-family: var(--font-mono); font-weight: 600; font-size: 22px; color: var(--accent); line-height: 1.3; }
+.step-body { display: grid; gap: 10px; min-width: 0; }
+.step-body .when { font-size: 13px; color: var(--muted); }
+
+.note, .warn, .done { border-radius: 6px; padding: 10px 14px; font-size: 14px; display: grid; gap: 4px; }
+.warn { background: var(--accent-soft); border-left: 3px solid var(--accent); }
+.done { background: var(--ok-soft); border-left: 3px solid var(--ok); }
+.note { background: var(--panel); border: 1px solid var(--line); }
+.label { font-weight: 700; }
+
+.table-scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); font-size: 12px; letter-spacing: .04em; white-space: nowrap; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+.ui { display: inline-block; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; font-size: .9em; background: var(--panel); white-space: nowrap; }
+.key { display: inline-block; border: 1px solid var(--muted); border-radius: 3px; padding: 0 5px; font-family: var(--font-mono); font-size: .82em; white-space: nowrap; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">リモート天文台 ・ 手順書</div>
+    <h1>SE-AT90M 観測前キャリブレーション</h1>
+    <p>カメラを付けてから、SynScan の 2 スターアラインメントを経て、天体を追尾するまでの手順です。2026-11-07 の夜に実機で通した内容と、そのとき測った値をもとにしています。</p>
+    <div class="meta">
+      <span>観測地 緯度 <span class="num">35.733319</span>、経度 <span class="num">139.753847</span>、標高 <span class="num">92</span> m</span>
+      <span>SPA <code>https://192.168.1.110:8080/</code></span>
+      <span>作成 2026-11-07</span>
+    </div>
+  </header>
+
+  <div class="flow">
+    <div>
+      <div class="eyebrow">アラインメント</div>
+      <ol>
+        <li>ファインダーとカメラを付ける</li>
+        <li>観測地を特定する</li>
+        <li>ランドマークでファインダーと主鏡を合わせる</li>
+        <li>真北に向ける（省略可）</li>
+        <li>北極星に向ける</li>
+        <li>SynScan の 2 スターアラインメント</li>
+      </ol>
+    </div>
+    <div>
+      <div class="eyebrow">観測開始</div>
+      <ol start="7">
+        <li>見たい天体へ自動導入</li>
+        <li>ファインダーと主鏡で中央に入れる</li>
+        <li>SPA で映像補正つきの追尾を始める</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="warn">
+    <span class="label">大きく動かす前に必ず守ること</span>
+    <ul>
+      <li>SynScan のアラインメント前は、架台が返す仰角の 0 の位置がでたらめです。読み取りの仰角が 90° を越えると、方位が 180° 飛んで仰角が裏返ります。2026-11-07 はこれで自動導入が止まらず、仰角に約 608°、方位に約 203° 回りました。</li>
+      <li>大きな移動は、方位と仰角を「どちら向きに何度」と先に書き出してから動かします。真北をまたぐ回り道や 360° 近い回転がないかを確かめます。</li>
+      <li>止めるときは、SPA の <span class="ui">停止</span>を押します。SynScan が動かしているときは <span class="key">ESC</span> を押します。</li>
+      <li>SPA の操作スティックは、1 回の操作で 45° または 120 秒までしか動きません。ほかにも、読み取りが急に飛んだら止まり、その軸はスティックを離すまで動きません。</li>
+    </ul>
+  </div>
+
+  <section>
+    <div class="phase">
+      <div class="eyebrow">事前準備</div>
+      <h2>ホストと映像の立ち上げ</h2>
+    </div>
+    <div class="note">
+      <ul>
+        <li>サービスは自動では起動しません。主鏡カメラ（SV205）、ファインダーカメラ（ELP）、シリアル変換をつなぎ、<code>lsusb -t</code> で SV205 が <span class="num">5000M</span> で認識されているかを見ます。<span class="num">480M</span> なら挿し直します。</li>
+        <li><code>systemctl --user start mediamtx</code> を実行し、ファインダーが 1920×1080/30fps で出ていることを確かめます。そのあと <code>systemctl --user start observatory</code> を実行します。</li>
+        <li>ファインダーが「Not enough bandwidth」で開けないときは、observatory を止めて、ファインダーを挿し直してから起動し直します。</li>
+        <li>架台の電源を入れても、SynScan のキーはまだ押しません。手順 6 で使います。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="phase">
+      <div class="eyebrow">アラインメント</div>
+      <h2>架台の向きを空に合わせる</h2>
+    </div>
+
+    <div class="step"><div class="step-no">1</div><div class="step-body">
+      <h3>ファインダーとカメラを付ける</h3>
+      <ul>
+        <li>主鏡の SV205 は、USB コネクタを真下にして、ロゴが読める向きで付けます。こうすると、画面の上下左右と操作スティックの向きが合います。</li>
+        <li>ファインダーは ELP（12 mm レンズ）です。1 画素が約 48″、見える範囲は約 26°×15° です。基板の裏面は金属から絶縁します。</li>
+        <li>ケーブルに余裕をもたせ、方位に ±180°、仰角に 0〜90° 回しても引っかからないことを確かめます。</li>
+      </ul>
+    </div></div>
+
+    <div class="step"><div class="step-no">2</div><div class="step-body">
+      <h3>観測地を特定する</h3>
+      <p class="when">架台を新しい場所に置いたときに行います。同じ場所なら、保存した値がそのまま使えます。</p>
+      <p>天体の位置計算、スカイツリーなどのランドマークの方位と仰角、SynScan に入れる緯度と経度は、すべてこの値から求めます。たとえばスカイツリー（5.76 km 先）なら、観測地が横に 10 m ずれると、方位が約 0.1° ずれます。</p>
+      <ol>
+        <li>スマートフォンで SPA を HTTPS で開き、<span class="ui">アライン</span>パネルの「観測地」で<span class="ui">この端末の位置を測る</span>を押します。位置情報の利用は許可します。何回か測ると、平均した位置と誤差が表示されます。</li>
+        <li><span class="ui">地図で合わせる</span>を押します。地理院地図の航空写真が開くので、望遠鏡のある場所（ベランダの位置など）に ＋ を合わせ、<span class="ui">この位置を採用</span>を押します。スマートフォンの測位は数 m〜数十 m ずれるので、地図で合わせたほうが正確です。</li>
+        <li>地面の標高とジオイド高は、地理院から自動で入ります。自分で入れるのは<b>地面から望遠鏡までの高さ</b>だけです。マンションなら「階数 × 約 3 m」が目安です。</li>
+        <li>標高（WGS84 の楕円体高）は、地面の標高、地面から望遠鏡までの高さ、ジオイド高の合計として自動で計算されます。値を確かめて、<span class="ui">観測地を保存</span>を押します。</li>
+      </ol>
+      <div class="table-scroll"><table>
+        <tr><th>項目</th><th class="num">今の観測地の値</th><th>SynScan に入れる値</th></tr>
+        <tr><td>緯度</td><td class="num">35.733319°</td><td><code>35°44' N</code></td></tr>
+        <tr><td>経度</td><td class="num">139.753847°</td><td><code>139°45' E</code></td></tr>
+        <tr><td>地面の標高</td><td class="num">13.0 m</td><td rowspan="3">標高 <code>92</code> m</td></tr>
+        <tr><td>地面から望遠鏡まで</td><td class="num">42.0 m</td></tr>
+        <tr><td>ジオイド高</td><td class="num">37.19 m</td></tr>
+        <tr><td>標高（楕円体高、合計）</td><td class="num">92.2 m</td><td></td></tr>
+      </table></div>
+      <div class="note">ホストの時計がずれていると、天体の位置計算もずれます。時刻が 1 分ずれると、天体が 1 分で動く分（約 0.25°）だけずれます。SPA には時計の警告がないので、ホストで <code>timedatectl</code> を実行し、「System clock synchronized: yes」と出ることを確かめます。SynScan に入れる時刻も、ホストの時計に合わせます。</div>
+    </div></div>
+
+    <div class="step"><div class="step-no">3</div><div class="step-body">
+      <h3>ランドマークでファインダーと主鏡を合わせる</h3>
+      <p class="when">夕方の明るいうちに行います。数 km 以上離れた、点状の目標を使います。</p>
+      <ul>
+        <li>スカイツリーの先端の灯りを使います。ここからの計算値は方位 <span class="num">116.49°</span>、仰角 <span class="num">5.72°</span>、距離 <span class="num">5.76</span> km です。</li>
+        <li>まず主鏡の赤いレティクルの中央に灯りを入れ、次にファインダーの物理的な向きを調整して、水色の照準に同じ灯りを重ねます。</li>
+        <li>ファインダーを動かせないときは、<span class="ui">照準を置く</span>をオンにして、ファインダー映像の灯りの位置をタップします。照準の位置はサーバーに保存されます。</li>
+        <li>両方の映像を撮って、<code>images/</code> に参考画像として残します。カメラを付け直したら、同じ場所で撮って比べます。</li>
+      </ul>
+      <div class="done"><span class="label">2026-11-07 の結果</span>主鏡では中心から約 21″、ファインダーでは 1 画素以内でした（<code>images/2026-11-07-skytree-alignment/</code>）。主鏡が見ている範囲は 16′×9′ なので、ずれは十分に小さい値です。</div>
+      <div class="note">ファインダーがぶつかって曲がったときは、この手順からやり直します。SynScan のアラインメントは、架台の電源を入れ直すと消えるので、手順 5 からやり直せば済みます。</div>
+    </div></div>
+
+    <div class="step"><div class="step-no">4</div><div class="step-body">
+      <h3>真北に向ける（省略可）</h3>
+      <p>スカイツリーから方位を <span class="num">116.5°</span> 反時計回りに回すと、真北です。仰角を水平に戻すと、架台の位置を確かめやすくなります。ただ、手順 5 で直接北極星へ向けるなら、この手順は省いてかまいません。</p>
+    </div></div>
+
+    <div class="step"><div class="step-no">5</div><div class="step-body">
+      <h3>北極星に向ける</h3>
+      <p class="when">暗くなってから行います。北極星はいつでも方位 0〜1°、仰角 35〜36.5° にあります。正確な位置は SPA の<span class="ui">アライン</span>パネルの天体一覧で確かめます。</p>
+      <div class="table-scroll"><table>
+        <tr><th>軸</th><th>スカイツリーから</th><th>動かす量</th><th>速度 9 での目安</th></tr>
+        <tr><td>方位</td><td><span class="num">116.5°</span> → 約 <span class="num">0.8°</span></td><td>反時計回りに約 <span class="num">−115.7°</span></td><td class="num">約 48 秒</td></tr>
+        <tr><td>仰角</td><td><span class="num">5.7°</span> → 約 <span class="num">35.8°</span></td><td>上へ約 <span class="num">+30°</span></td><td class="num">約 12 秒</td></tr>
+      </table></div>
+      <ul>
+        <li>方位は、45° 以下の小分けにして、3 回で回します。仰角は 1 回で上げます。</li>
+        <li>着いたら、北極星をファインダーで探します。ファインダーの<span class="ui">露出</span>は、<span class="num">150 ms</span>・ゲイン <span class="num">40</span> くらいにすると写ります。ファインダーの中央に入れたら、主鏡で確かめます。</li>
+        <li>SPA の<span class="ui">北極星を登録</span>は、SynScan を使わずに方位と仰角を表示するための、仮の位置合わせです。手順 6 を行う場合は不要です。登録しても、手順 6 が終わると自動で消えます。</li>
+      </ul>
+      <div class="done"><span class="label">2026-11-07 の結果</span>計画どおりに動かすと、北極星はファインダーの中心から約 16 画素の位置にありました。追加の補正は方位 <span class="num">+0.31°</span>、仰角 <span class="num">+0.20°</span> でした。</div>
+    </div></div>
+
+    <div class="step"><div class="step-no">6</div><div class="step-body">
+      <h3>SynScan の 2 スターアラインメント</h3>
+      <p class="when">先に SPA の<span class="ui">架台 接続中</span>を押して、<span class="ui">架台 切断中</span>にします。接続したままだと、アラインメントの完了時に値が変わるのを、サーバーが「読み取りの飛び」と判断して止めてしまいます。接続を切っても映像はそのまま見られます。</p>
+      <ol>
+        <li>版数の表示で <span class="key">ENTER</span>、太陽の警告で <span class="key">ENTER</span> を押します。</li>
+        <li>経度 <code>139°45' E</code>、緯度 <code>35°44' N</code>、タイムゾーン <code>+09:00</code>、標高 <code>92</code> m を入れます。</li>
+        <li>日付を <code>月/日/年</code> の形で入れ、時刻を 24 時間制で入れます。夏時間は <code>NO</code> です。</li>
+        <li>「Begin Alignment?」で <span class="key">1</span> を押し、「2-Star Align」を選びます。</li>
+        <li>1 つ目の星に <b>Polaris</b> を選びます。すでに向いているので、「Point scope to…」ではそのまま <span class="key">ENTER</span> を押します。</li>
+        <li>「Ctr. to eyepiece」で、主鏡の映像を見ながら十字キー（速度 2〜3）で北極星を中心に入れ、<span class="key">ENTER</span> を押します。北極星は追尾していないので、少しずつ動きます。早めに確定します。</li>
+        <li>2 つ目の星を選んで <span class="key">ENTER</span> を押すと、<b>SynScan が自動で動きます</b>。様子がおかしいときは <span class="key">ESC</span> を押します。この動きには、サーバーの安全装置が効きません。</li>
+        <li>止まったら、ファインダーで星を探し、速度 5〜6 でファインダーの中心に入れます。続けて、速度 2〜3 で主鏡の中心に入れ、<span class="key">ENTER</span> を押します。「Alignment Successful」と出れば完了です。</li>
+        <li>SPA の<span class="ui">架台 切断中</span>を押して、接続し直します。状態表示が<span class="ui">SynScan アライン済</span>になり、SynScan の値がそのまま方位と仰角として表示されます。</li>
+      </ol>
+
+      <h3>2 つ目の星の選び方</h3>
+      <p>部屋の向きの関係で、見えるのはほぼ東の空だけです。南の空は仰角 10° くらいまでしか見えません。SynScan のマニュアルでは、次の 3 つが推奨されています。</p>
+      <ul>
+        <li>2 つの星の仰角が、どちらも 15〜60°</li>
+        <li>仰角の差が 10〜30°</li>
+        <li>方位の差が 45〜135°</li>
+      </ul>
+      <p>北極星の仰角は約 36° です。そのため、2 つ目の星は<b>方位 45〜135°（東側）で、仰角 15〜26° か 46〜60°</b> にあるものを選びます。</p>
+      <div class="table-scroll"><table>
+        <tr><th>星</th><th>明るさ</th><th>使いやすい時間（11 月上旬）</th><th>メモ</th></tr>
+        <tr><td>ミラク</td><td class="num">2.1 等</td><td>夕方から 19:10 ごろまで</td><td>2026-11-07 に使った星です。ファインダーで探すときは、露出 150 ms・ゲイン 40 にします。</td></tr>
+        <tr><td>アルデバラン</td><td class="num">0.9 等</td><td>20:00〜20:40 ごろ</td><td>明るく、真東の仰角 20° 前後にあります。</td></tr>
+        <tr><td>カペラ</td><td class="num">0.1 等</td><td>19:25 前後</td><td>方位の差が下限ぎりぎりです。</td></tr>
+      </table></div>
+      <p class="muted">星が一覧に出ないときは、Setup → Alignment Stars → Adv. Filter を OFF にします。それでも、仰角 15° 未満と 75° 超の星は出ません。</p>
+      <div class="done"><span class="label">2026-11-07 の結果</span>北極星とミラクでアラインメントしました。そのあと、SynScan の値とミラクの計算位置の差は、方位 <span class="num">0.01°</span>、仰角 <span class="num">0.04°</span> でした。アラインメント後は、読み取りの仰角の裏返りは天頂の近くでしか起きません。</div>
+    </div></div>
+  </section>
+
+  <section>
+    <div class="phase">
+      <div class="eyebrow">観測開始</div>
+      <h2>天体を入れて追いかける</h2>
+    </div>
+
+    <div class="step"><div class="step-no">7</div><div class="step-body">
+      <h3>見たい天体へ自動導入</h3>
+      <ol>
+        <li>SPA の<span class="ui">追尾</span>を開きます。</li>
+        <li>天体を選びます。よく使う天体はボタンから選べます（月、木星、土星、天王星、カペラ、ベガ、プレアデス、M1、M42、M31）。それ以外は、名前（<code>M45</code>、<code>かに星雲</code>、<code>Uranus</code> など）か、J2000 の赤経・赤緯を入れて<span class="ui">調べる</span>を押します。
+          <ul>
+            <li>赤経・赤緯は、<code>5h34m31.94s +22°00'52.2"</code>、<code>05:34:31.94 +22:00:52.2</code>、<code>5 34 31.94 22 00 52.2</code>、<code>83.633 22.015</code>（度）のどれでも入れられます。</li>
+            <li>一覧の名前は、主な恒星、M1、M13、M31、M42、M45、M57、太陽系の惑星です。</li>
+          </ul>
+        </li>
+        <li>天体の今の方位・高度と、今の向きとの差が出ます。2 秒ごとに更新されます。</li>
+        <li><span class="ui">自動導入の計画を見る</span>を押します。方位を東回りか西回りに何度、高度を上か下へ何度回すかと、止める条件が出ます。確かめてから<span class="ui">この計画で導入</span>を押します。</li>
+      </ol>
+      <ul>
+        <li>サーバーは SynScan の <code>r</code> コマンド（J2000 の赤経・赤緯）で導入します。<b>SynScan の 2 スターアラインメント（手順 6）が済んでいないと使えません。</b></li>
+        <li>次の場合は、計画の段階で断ります。
+          <ul>
+            <li>目標の高度が 10° 未満か 80° を超える（天頂付近は読み取りが裏返ります）</li>
+            <li>どちらかの軸の移動が 45° を超える（途中の天体を経由して、分けて動かします）</li>
+            <li>架台の範囲制限を越える</li>
+            <li>太陽</li>
+          </ul>
+        </li>
+        <li>動いている間は、次のときに自動導入を取り消し（<code>M</code>）、両軸を止めます。
+          <ul>
+            <li>方位が逆向きに 5° 回ったとき</li>
+            <li>方位が計画より 8° 以上多く回ったとき</li>
+            <li>高度が計画の範囲（出発と目標の間 ±5°）から出たとき</li>
+            <li>読み取りが飛んだとき</li>
+            <li>時間（20 秒 + 1° あたり 1.5 秒、最大 120 秒）を過ぎたとき</li>
+          </ul>
+          <span class="ui">停止</span>を押しても止まります。導入中は操作スティックは効きません。
+        </li>
+        <li>確認してから 2 分を過ぎた計画や、確認した後に架台が 3° 以上動いた計画は実行しません。もう一度計画を見ます。</li>
+        <li>着くと、SynScan が自分で恒星の追尾を始めます。画面の下に「SynScan が…追尾中」と出ます。</li>
+        <li>SynScan の手元のカタログから選んで <span class="key">ENTER</span> で導入してもかまいません。そのときは先に<span class="ui">架台 切断中</span>にします。</li>
+      </ul>
+      <div class="done"><span class="label">2026-11-07 の結果</span>主鏡では中心から約 21″、ファインダーでは 1 画素以内でした（<code>images/2026-11-07-skytree-alignment/</code>）。主鏡が見ている範囲は 16′×9′ なので、ずれは十分に小さい値です。</div>
+      <div class="note">ファインダーがぶつかって曲がったときは、この手順からやり直します。SynScan のアラインメントは、架台の電源を入れ直すと消えるので、手順 5 からやり直せば済みます。</div>
+    </div></div>
+
+    <div class="step"><div class="step-no">4</div><div class="step-body">
+      <h3>真北に向ける（省略可）</h3>
+      <p>スカイツリーから方位を <span class="num">116.5°</span> 反時計回りに回すと、真北です。仰角を水平に戻すと、架台の位置を確かめやすくなります。ただ、手順 5 で直接北極星へ向けるなら、この手順は省いてかまいません。</p>
+    </div></div>
+
+    <div class="step"><div class="step-no">5</div><div class="step-body">
+      <h3>北極星に向ける</h3>
+      <p class="when">暗くなってから行います。北極星はいつでも方位 0〜1°、仰角 35〜36.5° にあります。正確な位置は SPA の<span class="ui">アライン</span>パネルの天体一覧で確かめます。</p>
+      <div class="table-scroll"><table>
+        <tr><th>軸</th><th>スカイツリーから</th><th>動かす量</th><th>速度 9 での目安</th></tr>
+        <tr><td>方位</td><td><span class="num">116.5°</span> → 約 <span class="num">0.8°</span></td><td>反時計回りに約 <span class="num">−115.7°</span></td><td class="num">約 48 秒</td></tr>
+        <tr><td>仰角</td><td><span class="num">5.7°</span> → 約 <span class="num">35.8°</span></td><td>上へ約 <span class="num">+30°</span></td><td class="num">約 12 秒</td></tr>
+      </table></div>
+      <ul>
+        <li>方位は、45° 以下の小分けにして、3 回で回します。仰角は 1 回で上げます。</li>
+        <li>着いたら、北極星をファインダーで探します。ファインダーの<span class="ui">露出</span>は、<span class="num">150 ms</span>・ゲイン <span class="num">40</span> くらいにすると写ります。ファインダーの中央に入れたら、主鏡で確かめます。</li>
+        <li>SPA の<span class="ui">北極星を登録</span>は、SynScan を使わずに方位と仰角を表示するための、仮の位置合わせです。手順 6 を行う場合は不要です。登録しても、手順 6 が終わると自動で消えます。</li>
+      </ul>
+      <div class="done"><span class="label">2026-11-07 の結果</span>計画どおりに動かすと、北極星はファインダーの中心から約 16 画素の位置にありました。追加の補正は方位 <span class="num">+0.31°</span>、仰角 <span class="num">+0.20°</span> でした。</div>
+    </div></div>
+
+    <div class="step"><div class="step-no">6</div><div class="step-body">
+      <h3>SynScan の 2 スターアラインメント</h3>
+      <p class="when">先に SPA の<span class="ui">架台 接続中</span>を押して、<span class="ui">架台 切断中</span>にします。接続したままだと、アラインメントの完了時に値が変わるのを、サーバーが「読み取りの飛び」と判断して止めてしまいます。接続を切っても映像はそのまま見られます。</p>
+      <ol>
+        <li>版数の表示で <span class="key">ENTER</span>、太陽の警告で <span class="key">ENTER</span> を押します。</li>
+        <li>経度 <code>139°45' E</code>、緯度 <code>35°44' N</code>、タイムゾーン <code>+09:00</code>、標高 <code>92</code> m を入れます。</li>
+        <li>日付を <code>月/日/年</code> の形で入れ、時刻を 24 時間制で入れます。夏時間は <code>NO</code> です。</li>
+        <li>「Begin Alignment?」で <span class="key">1</span> を押し、「2-Star Align」を選びます。</li>
+        <li>1 つ目の星に <b>Polaris</b> を選びます。すでに向いているので、「Point scope to…」ではそのまま <span class="key">ENTER</span> を押します。</li>
+        <li>「Ctr. to eyepiece」で、主鏡の映像を見ながら十字キー（速度 2〜3）で北極星を中心に入れ、<span class="key">ENTER</span> を押します。北極星は追尾していないので、少しずつ動きます。早めに確定します。</li>
+        <li>2 つ目の星を選んで <span class="key">ENTER</span> を押すと、<b>SynScan が自動で動きます</b>。様子がおかしいときは <span class="key">ESC</span> を押します。この動きには、サーバーの安全装置が効きません。</li>
+        <li>止まったら、ファインダーで星を探し、速度 5〜6 でファインダーの中心に入れます。続けて、速度 2〜3 で主鏡の中心に入れ、<span class="key">ENTER</span> を押します。「Alignment Successful」と出れば完了です。</li>
+        <li>SPA の<span class="ui">架台 切断中</span>を押して、接続し直します。状態表示が<span class="ui">SynScan アライン済</span>になり、SynScan の値がそのまま方位と仰角として表示されます。</li>
+      </ol>
+
+      <h3>2 つ目の星の選び方</h3>
+      <p>部屋の向きの関係で、見えるのはほぼ東の空だけです。南の空は仰角 10° くらいまでしか見えません。SynScan のマニュアルでは、次の 3 つが推奨されています。</p>
+      <ul>
+        <li>2 つの星の仰角が、どちらも 15〜60°</li>
+        <li>仰角の差が 10〜30°</li>
+        <li>方位の差が 45〜135°</li>
+      </ul>
+      <p>北極星の仰角は約 36° です。そのため、2 つ目の星は<b>方位 45〜135°（東側）で、仰角 15〜26° か 46〜60°</b> にあるものを選びます。</p>
+      <div class="table-scroll"><table>
+        <tr><th>星</th><th>明るさ</th><th>使いやすい時間（11 月上旬）</th><th>メモ</th></tr>
+        <tr><td>ミラク</td><td class="num">2.1 等</td><td>夕方から 19:10 ごろまで</td><td>2026-11-07 に使った星です。ファインダーで探すときは、露出 150 ms・ゲイン 40 にします。</td></tr>
+        <tr><td>アルデバラン</td><td class="num">0.9 等</td><td>20:00〜20:40 ごろ</td><td>明るく、真東の仰角 20° 前後にあります。</td></tr>
+        <tr><td>カペラ</td><td class="num">0.1 等</td><td>19:25 前後</td><td>方位の差が下限ぎりぎりです。</td></tr>
+      </table></div>
+      <p class="muted">星が一覧に出ないときは、Setup → Alignment Stars → Adv. Filter を OFF にします。それでも、仰角 15° 未満と 75° 超の星は出ません。</p>
+      <div class="done"><span class="label">2026-11-07 の結果</span>北極星とミラクでアラインメントしました。そのあと、SynScan の値とミラクの計算位置の差は、方位 <span class="num">0.01°</span>、仰角 <span class="num">0.04°</span> でした。アラインメント後は、読み取りの仰角の裏返りは天頂の近くでしか起きません。</div>
+    </div></div>
+  </section>
+
+  <section>
+    <div class="phase">
+      <div class="eyebrow">観測開始</div>
+      <h2>天体を入れて追いかける</h2>
+    </div>
+
+    <div class="step"><div class="step-no">7</div><div class="step-body">
+      <h3>見たい天体へ自動導入</h3>
+      <ul>
+        <li>SPA にはまだ自動導入のボタンがありません。SynScan の天体カタログから選んで <span class="key">ENTER</span> を押すか、Claude に頼みます。Claude は SynScan の <code>r</code> コマンド（J2000 の赤経・赤緯）を使います。</li>
+        <li>どちらの場合も、先に<span class="ui">架台 切断中</span>にし、動き方（方位と仰角の向きと量）を確かめてから動かします。Claude が動かす場合は、次のときに自動導入を取り消して止めます。
+          <ul>
+            <li>方位が逆向きに 5° 動いたとき</li>
+            <li>方位が予定の量を超えたとき</li>
+            <li>仰角が予定の範囲から出たとき</li>
+            <li>読み取りが飛んだとき</li>
+            <li>60 秒を過ぎたとき</li>
+          </ul>
+        </li>
+        <li>着いたら、接続し直します。SynScan は恒星の追尾を続けます。サーバーとつないでも、この追尾は止まりません。</li>
+      </ul>
+      <div class="done"><span class="label">2026-11-07 の結果</span>
+        <ul>
+          <li>土星は 9 秒、アルキオネは 11 秒で着きました。</li>
+          <li>SPA の自動導入で、21:30 にアルキオネから M1 へ（西へ 12.5°、下へ 22.7°）7 秒で着きました。最後に少し行き過ぎてから戻る動きがあり、計画の範囲内でした。差は方位 +0.03°、高度 +0.07° です。</li>
+          <li>ζ Tau へ 2 回導入すると、主鏡の中心からのずれは、上から下ろして着いたとき「右 1.8′、下 4.5′」、下から上げて着いたとき「右 2.9′、上 1.1′」でした。高度の差 5.6′ は、高度の歯車のガタ（約 5.9′）とほぼ同じです。架台の読み取りの差は、どちらも方位 +0.03°、高度 +0.07° で変わりません。</li>
+          <li>着いた位置と計算位置の差は 0.03〜0.06° で、時間にして 2〜4 分角です。主鏡が見ている範囲は 16′×9′ なので、中心から外れることがあります（土星は外れました）。</li>
+        </ul>
+      </div>
+    </div></div>
+
+    <div class="step"><div class="step-no">8</div><div class="step-body">
+      <h3>ファインダーと主鏡で中央に入れる</h3>
+      <ul>
+        <li>まずファインダーで、天体を水色の照準に入れます。次に主鏡の映像で、赤いレティクルの中心に入れます。</li>
+        <li><b>SynScan の十字キーを使うと、SynScan の追尾は続きます。</b>目安は、ファインダーで寄せるときが速度 5〜6、主鏡で寄せるときが速度 2〜3 です。</li>
+        <li><b>SPA の操作スティックを使うと、SynScan の追尾は止まります。</b>2026-11-07 は、方位で約 12″/秒の速さで流れ始めました。スティックで合わせた場合は、手順 9 でサーバーの追尾を始めるか、<span class="ui">SynScan の追尾に戻す</span>を押します。</li>
+        <li>主鏡のカメラは手動露出にします。土星は露出 <span class="num">30 ms</span>・ゲイン <span class="num">60</span> くらいで、輪の形が分かりました。自動露出では白飛びしてしまいます。</li>
+      </ul>
+    </div></div>
+
+    <div class="step"><div class="step-no">9</div><div class="step-body">
+      <h3>SPA で追尾を始める</h3>
+      <ol>
+        <li>SPA の<span class="ui">追尾</span>を開き、手順 7 と同じように天体を選びます。ボタンにない天体も、名前か赤経・赤緯で選べます。</li>
+        <li>映像で補正するときは、<span class="ui">映像で補正する</span>にチェックを入れます。</li>
+        <li><span class="ui">この天体を追尾</span>を押します。</li>
+      </ol>
+      <ul>
+        <li>サーバーは、選んだ天体の位置から動く速さ（方位と高度、秒角/秒）を計算し、架台をその速さで回します。始めるときに SynScan の追尾は切ります（重ねて動かさないため）。</li>
+        <li>映像の補正は、主鏡の映像を数秒分ずつ平均して、最初の画像からのずれを測ります。そのずれの一部だけを、15 秒ごとに速さへ反映します。画像全体の位相相関（numpy の FFT。OpenCV の <code>phaseCorrelate</code> と同じ考え方）で測るので、主鏡は手動露出にして、白飛びさせないようにします。</li>
+        <li>かに星雲（M1）のように淡くて映像に模様が写らない天体は、補正が「模様を見失い、補正を保留」のままになります。そのときはチェックを外し、計算した速さだけで追尾します。</li>
+        <li><span class="ui">SynScan の追尾に戻す</span>を押すと、サーバーの追尾をやめて SynScan 本体の alt-az 追尾（<code>T</code> コマンド）に戻します。SPA の操作スティックで SynScan の追尾が切れたあとに使います。</li>
+        <li><span class="ui">追尾を止める</span>と<span class="ui">停止</span>は、サーバーの追尾と SynScan の追尾の両方を止めます。</li>
+        <li>サーバーの追尾中も、SynScan に追尾の状態を尋ねる（<code>t</code>）と「alt-az 追尾」と答えます。速さが 2 倍になるわけではありません。</li>
+        <li>サーバーの追尾は、サーバーを再起動すると止まります。再起動したら、もう一度押します。SynScan の追尾は、サーバーを再起動しても続きます。</li>
+      </ul>
+      <div class="done"><span class="label">2026-11-07 の結果</span>
+        <ul>
+          <li>M1 を映像の補正なしで追尾し、3 分間の読み取りで計算位置との差は方位 +1.8′→+1.6′、高度 +4.5′ のまま、ほぼ動きませんでした。</li>
+          <li>主鏡では、露出 1 秒・ゲイン 128 でも M1 も周りの星も写りませんでした（高度 28°、街明かり）。このような天体では、映像での確認と補正はできません。</li>
+          <li>M1 の 1.1° 南東の ζ Tau（天関、3.0 等）は露出 30 ms・ゲイン 75 で写りました。映像の補正つきで追尾すると、2.5 分の間、星は ±0.2′（約 12″）の中に留まり、ずれの測定値は最大 23″ から約 4″ に縮みました。補正は方位 +1.3″/秒、高度 −0.35″/秒ほどで落ち着きました。</li>
+          <li>淡い天体を見るときは、近くの明るい星で導入のずれを確かめてから、天体へ移ります。</li>
+        </ul>
+      </div>
+    </div></div>
+  </section>
+
+  <section>
+    <div class="phase">
+      <div class="eyebrow">資料</div>
+      <h2>測った値</h2>
+    </div>
+    <div class="table-scroll"><table>
+      <tr><th>項目</th><th class="num">値</th><th>メモ</th></tr>
+      <tr><td>主鏡 1080p の画素の大きさ</td><td class="num">0.515″/px</td><td>見える範囲は約 16.5′×9.3′</td></tr>
+      <tr><td>ファインダーの画素の大きさ</td><td class="num">44〜50″/px</td><td>見える範囲は約 26°×15°</td></tr>
+      <tr><td>速度 9 の速さ（方位）</td><td class="num">2.41°/s</td><td>仰角の速度 7〜9 は未測定</td></tr>
+      <tr><td>主鏡カメラの露出</td><td class="num">最大 1 秒</td><td>ゲインは 0〜128</td></tr>
+      <tr><td>ファインダーの露出</td><td class="num">最大 0.5 秒</td><td>ゲインは 0〜100。挿し直すと自動露出に戻ります。</td></tr>
+      <tr><td>撮影の待ち時間</td><td class="num">3 秒 + 露出×2</td><td>SV205 は映像を流し直すたびに手動露出が効かなくなるので、サーバーが設定し直して、効くまでの分は保存しません。</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <div class="phase">
+      <div class="eyebrow">資料</div>
+      <h2>やり直しの目安</h2>
+    </div>
+    <div class="table-scroll"><table>
+      <tr><th>こうなったら</th><th>ここからやり直す</th></tr>
+      <tr><td>架台を別の場所に置いた</td><td>手順 2</td></tr>
+      <tr><td>カメラやファインダーを付け直した、または曲がった</td><td>手順 3</td></tr>
+      <tr><td>架台の電源を入れ直した</td><td>手順 5（SynScan のアラインメントが消えるため）</td></tr>
+      <tr><td>架台を持ち上げた、置き直した</td><td>手順 5</td></tr>
+      <tr><td>サーバーを再起動した</td><td>手順 9（SynScan のアラインメントは残ります）</td></tr>
+      <tr><td>天体を変える</td><td>手順 7</td></tr>
+    </table></div>
+  </section>
+</div>

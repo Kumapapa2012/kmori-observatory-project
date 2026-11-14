@@ -1,0 +1,14 @@
+# 撮影データ（大容量）
+/captures/
+
+# 実行時の状態と TLS の鍵
+/var/
+
+# ダウンロードし直せるもの
+/bin/mediamtx
+/data/*.bsp
+
+# Python
+__pycache__/
+*.pyc
+.venv/

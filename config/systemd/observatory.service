@@ -1,0 +1,10 @@
+[Unit]
+Description=Observatory server
+After=mediamtx.service
+
+[Service]
+WorkingDirectory=%h/claude_code/kmori-observatory-project
+Environment=PYTHONPATH=server
+ExecStart=/usr/bin/python3 -m observatory --config config/observatory.toml
+Restart=on-failure
+RestartSec=3

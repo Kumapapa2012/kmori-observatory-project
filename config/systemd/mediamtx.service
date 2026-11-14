@@ -1,0 +1,8 @@
+[Unit]
+Description=Observatory video stream (MediaMTX)
+
+[Service]
+WorkingDirectory=%h/claude_code/kmori-observatory-project
+ExecStart=%h/claude_code/kmori-observatory-project/bin/mediamtx config/mediamtx.yml
+Restart=on-failure
+RestartSec=3

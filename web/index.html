@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Observatory</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css?v=8">
+</head><body>
+<div id="app">
+  <!-- 表示は main（主鏡が大きくファインダーがワイプ）、finder（その逆）、split（横並び） -->
+  <div id="views" data-view="main">
+    <div class="view" id="view-main">
+      <div class="frame">
+        <div class="zoom"><video id="video" autoplay muted playsinline></video></div>
+        <svg class="reticle" viewBox="-100 -100 200 200" aria-hidden="true">
+          <circle r="100" stroke-width="1"/>
+          <path class="post" d="M0-100V-30M0 100V30M-100 0H-30M100 0H30"/>
+          <path class="hair" d="M0-30V30M-30 0H30M0-100V-5000M0 100V5000M-100 0H-5000M100 0H5000"/>
+        </svg>
+        <span class="view-label">主鏡</span>
+      </div>
+    </div>
+    <div class="view" id="view-finder">
+      <div class="frame">
+        <div class="zoom" id="finder-zoom"><video id="finder-video" autoplay muted playsinline></video></div>
+        <svg class="reticle" id="finder-reticle" viewBox="-100 -100 200 200" aria-hidden="true">
+          <circle r="100" stroke-width="1"/>
+          <path class="post" d="M0-100V-30M0 100V30M-100 0H-30M100 0H30"/>
+          <path class="hair" d="M0-30V30M-30 0H30M0-100V-5000M0 100V5000M-100 0H-5000M100 0H5000"/>
+        </svg>
+        <span class="view-label">ファインダー</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="status" class="panel" role="status"></div>
+  <div id="pointing" class="panel"></div>
+  <div id="menu" class="panel">
+    <button id="view-mode">表示: 主鏡</button>
+    <button id="open-align">アライン</button>
+    <button id="open-track">追尾</button>
+    <button id="open-camera">カメラ設定</button>
+    <button id="open-capture">撮影</button>
+    <button id="fullscreen">全画面</button>
+  </div>
+
+  <div id="camera" class="panel dialog" hidden>
+    <div class="title">カメラ</div>
+    <div class="row" id="camera-target">
+      <button data-camera="camera">主鏡</button><button data-camera="finder">ファインダー</button>
+    </div>
+    <label><input type="checkbox" id="manual"> 手動露出</label>
+    <label>露出 <input type="range" id="exposure" min="0" max="4" step="0.01"> <span id="exposure-value"></span></label>
+    <label>ゲイン <input type="range" id="gain" min="0" max="128" step="1"> <span id="gain-value"></span></label>
+    <button id="close-camera">閉じる</button>
+  </div>
+
+  <div id="align" class="panel dialog" hidden>
+    <div class="title">アラインメント</div>
+    <div id="align-state"></div>
+    <div class="note">北極星を画面中央の十字に合わせてから登録します。向きを変えた直後はガタが残るので、最後は上向き、右向きに動かして合わせます。</div>
+    <div class="row"><button id="register">北極星を登録</button><button id="clear-align">解除</button><button id="close-align">閉じる</button></div>
+    <table id="targets"></table>
+    <div class="title">観測地</div>
+    <div class="row site">
+      <label>緯度 <input type="number" id="site-lat" step="0.000001"></label>
+      <label>経度 <input type="number" id="site-lon" step="0.000001"></label>
+      <label>標高 m <input type="number" id="site-elev" step="0.1"></label>
+    </div>
+    <div class="row site">
+      <label>地面 m <input type="number" id="site-ground" step="0.1"></label>
+      <label>地面から望遠鏡 m <input type="number" id="site-height" step="0.1"></label>
+      <label>ジオイド高 m <input type="number" id="site-geoid" step="0.01"></label>
+    </div>
+    <div id="site-state" class="note"></div>
+    <div class="note">測ってから「地図で合わせる」で望遠鏡の位置に ＋ を合わせると、地面の標高とジオイド高は地理院から取得します。入力するのは地面から望遠鏡までの高さだけです。標高は WGS84 の楕円体高（3 つの合計）です。</div>
+    <div class="row"><button id="site-measure">この端末の位置を測る</button><button id="site-map-open">地図で合わせる</button><button id="site-save">観測地を保存</button></div>
+  </div>
+
+  <div id="site-map" class="panel dialog" hidden>
+    <div id="map-center"></div>
+    <div id="map-area"><div id="map"></div><div class="map-cross"></div></div>
+    <div class="note" id="map-note"></div>
+    <div class="row">
+      <button id="map-layer">標準地図にする</button><button id="map-home">測位の位置へ</button>
+      <button id="map-adopt">この位置を採用</button><button id="map-cancel">やめる</button>
+    </div>
+  </div>
+
+  <div id="track" class="panel dialog" hidden>
+    <div class="title">天体の導入と追尾</div>
+    <div class="row" id="track-quick"></div>
+    <div class="row track-query">
+      <input type="text" id="track-query" placeholder="名前（M1、天王星）か 赤経 赤緯（5h34m31.9s +22°00'52&quot;）" autocomplete="off">
+      <button id="track-lookup">調べる</button>
+    </div>
+    <div id="track-info" class="note"></div>
+    <div id="track-plan" hidden>
+      <div id="track-plan-text"></div>
+      <div class="row"><button id="goto-run" class="go">この計画で導入</button><button id="goto-cancel">やめる</button></div>
+    </div>
+    <div class="row"><button id="goto-plan" disabled>自動導入の計画を見る</button></div>
+    <label><input type="checkbox" id="track-guide" checked> 映像で補正する（手動露出で白飛びさせないこと）</label>
+    <div class="row"><button id="track-start" disabled>この天体を追尾</button><button id="track-synscan">SynScan の追尾に戻す</button></div>
+    <div class="note">導入は SynScan 本体のアライメント済みのときだけ使えます。追尾は視野に入れてから開始します。追尾中もスティックで微調整でき、離すと追尾に戻ります（SynScan の追尾はスティックで切れるので、「SynScan の追尾に戻す」で戻します）。</div>
+    <div class="row"><button id="stop-track">追尾を止める</button><button id="close-track">閉じる</button></div>
+  </div>
+
+  <div id="capture" class="panel dialog" hidden>
+    <div class="title">撮影</div>
+    <div id="capture-state"></div>
+    <div id="capture-message" hidden><span id="capture-message-text"></span><button id="capture-message-ok">OK</button></div>
+    <label>対象 <input type="text" id="capture-target" maxlength="40" placeholder="例: jupiter（省略可）"></label>
+    <div class="row"><button id="shoot-still">静止画</button><span class="note">3264×2160 PNG。ライブが数秒止まります</span></div>
+    <div class="row"><button id="shoot-timelapse">タイムラプス</button><label><input type="number" id="timelapse-interval" min="5" step="1" value="5"> 秒間隔</label></div>
+    <div class="row"><button id="shoot-video">動画</button><label><input type="number" id="video-seconds" min="1" max="900" step="1" value="120"> 秒</label><span class="note">1080p 30fps 無圧縮、約 7.5GB/分</span></div>
+    <div class="note">タイムラプスと動画は手動露出で開始し、撮影中は露出を変更できません。静止画とタイムラプスの視野は 14.5'×9.6' で、1080p の 16.5'×9.3' と異なります。</div>
+    <div class="row"><button id="shoot-stop">撮影を止める</button><button id="close-capture">閉じる</button></div>
+    <img id="capture-preview" alt="" hidden>
+    <table id="capture-list"></table>
+  </div>
+
+  <div id="finder-tools" class="panel">
+    <span>ファインダー</span>
+    <button id="finder-zoom-button">×1</button>
+    <button id="finder-place">照準を置く</button>
+    <button id="finder-reset">中央へ</button>
+    <button id="finder-camera">露出</button>
+  </div>
+
+  <div id="stick" class="panel"><span class="stick-label">パン / ティルト</span><div id="knob"></div></div>
+  <div id="notice"></div>
+  <button id="mount-link" class="on">架台 接続中</button>
+  <button id="stop">停止</button>
+</div>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="app.js?v=12"></script>
+</body></html>

@@ -42,7 +42,10 @@ still_timeout = 15
 stop_timeout = 10
 
 [mount]
-# auto は /dev/serial/by-id から探す
+# 架台の接続方式。"synscan" はハンドコントローラー（SynScan）経由のコントローラー版、
+# "direct" は SynHub の USB でモーター基板に直結する直結版（2026-11-14 決定）
+backend = "direct"
+# auto は /dev/serial/by-id から探す（synscan は *Serial*、direct は [mount.direct] の port_glob）
 port = "auto"
 max_rate = 9
 az_limit = 180.0
@@ -85,3 +88,39 @@ rate = 5
 source = "time"
 lead = 0.48
 start_delay = 0.4
+
+# 直結版の設定（計画書「段階 2 の決定」）。安全装置の値は safety.py の SafetyConfig の名前で上書きできる
+[mount.direct]
+port = "auto"
+port_glob = "/dev/serial/by-id/*SynHub*"
+expected_cpr = 865050
+
+[mount.direct.backlash]
+# 2026-11-14 に 2° の目標移動で、同じ向きと反転を比べて測った値（度）
+enabled = true
+az = 0.5
+alt = 0.15
+
+[mount.direct.safety]
+alt_min = -5.0
+alt_max = 92.0
+az_span = 180.0
+restricted_az = 30.0
+restricted_alt = 20.0
+restricted_rate = 0.3
+max_rate = 3.0
+track_max_rate = 0.05
+max_move_deg = 45.0
+max_move_seconds = 120.0
+
+# 向きの基準に使える目標。観測地（latitude、longitude）から radius_km 以内のときだけ選べる。
+# az と alt はその観測地から見た目標の本当の方位・高度（度）
+[[mount.direct.landmarks]]
+key = "skytree"
+label = "スカイツリー先端"
+latitude = 35.7333
+longitude = 139.7538
+radius_km = 1.0
+# 2026-11-07 に計算し、北極星の導入（ずれ 0.22°）で確かめた値
+az = 116.49
+alt = 5.72

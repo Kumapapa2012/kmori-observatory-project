@@ -407,7 +407,7 @@ def create_app(cfg):
         `z` が本当の方位・高度なので、差 0 の校正として扱う。"""
         if state["alignment"]:
             return state["alignment"]
-        if state.get("synscan_aligned"):
+        if not direct and state.get("synscan_aligned"):
             return SYNSCAN_ALIGNMENT
         return None
 

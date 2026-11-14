@@ -10,6 +10,7 @@ SynHub（USB CDC）では命令は折り返されない。ハンドコントロ�
 この部品は送受信と返事の検査だけを受け持ち、安全の判断はしない（safety.py と direct_mount.py）。
 """
 import re
+import termios
 import threading
 
 import serial
@@ -69,7 +70,11 @@ class MotorBoard:
         last = None
         with self.lock:
             for _ in range(self.retries + 1):
-                reply = self._once(line)
+                try:
+                    reply = self._once(line)
+                except (serial.SerialException, OSError, termios.error) as e:
+                    # USB が抜けた（架台の電源を切ると SynHub も消える）など
+                    raise MotorError(f"{line!r} の送受信に失敗: {e}") from e
                 match = REPLY.fullmatch(reply)
                 if match and match.group(1) == b"=":
                     return match.group(2).decode()

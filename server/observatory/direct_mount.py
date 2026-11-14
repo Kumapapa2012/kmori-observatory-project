@@ -418,8 +418,8 @@ class DirectMount:
             try:
                 self._tick()
                 self.error = ""
-            except MountError as e:
-                self.error = str(e)
+            except Exception as e:  # 見張りのスレッドは何があっても止めない
+                self.error = str(e) or type(e).__name__
                 reason = self.monitor.read_failed()
                 if reason:
                     self._fail(reason)

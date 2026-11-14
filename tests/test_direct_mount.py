@@ -241,6 +241,15 @@ class DirectMountTest(unittest.TestCase):
         m.stop()
         self.assertFalse(any(a.running for a in self.fake.axes.values()))
 
+    def test_unplugged_usb_sets_error(self):
+        m = self.make(reference=power_on_reference())
+
+        def broken(*a):
+            raise OSError(5, "Input/output error")
+        self.fake.reset_input_buffer = broken
+        self.assertTrue(wait_for(lambda: m.status()["error"] != ""))
+        self.assertTrue(m.thread.is_alive())
+
     def test_synscan_features_absent(self):
         m = self.make()
         self.assertFalse(m.synscan_aligned())

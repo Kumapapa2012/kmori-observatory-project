@@ -20,7 +20,9 @@ from .camera import Camera
 from .capture import Capture, CaptureError
 from .config import ROOT, resolve
 from .guiding import FrameReader, Guider, apply_correction, field_rotation_rate
+from .direct_mount import DirectMount
 from .mount import Mount, MountError
+from .safety import Reference, SafetyError, check_sun
 from .sky import LABELS, Sky, TargetError, format_radec
 from .sky import resolve as resolve_target
 from .state import StateStore
@@ -44,6 +46,7 @@ GOTO_MAX_DEG = 45.0  # 1 回の導入で各軸を動かしてよい量（度）
 GOTO_ALT_MARGIN = 5.0  # 途中の高度が、出発と目標の間からはみ出してよい量（度）
 GOTO_PLAN_TTL = 120.0  # 計画を確認してから実行できるまでの時間（秒）
 GOTO_REPLAN_TOLERANCE = 3.0  # 確認した計画と実行時の計画の差の上限（度）
+DIRECT_GOTO_MAX_ALT = 88.0  # 直結版は天頂付近でも読み取りが裏返らない（2026-11-14 に 93° まで確認）
 
 
 class MountSupervisor:
@@ -53,8 +56,10 @@ class MountSupervisor:
     手元操作（アライメントなど）の間に使う。映像の配信はそのまま続く。"""
 
     def __init__(self, cfg, on_tick=lambda mount: None, on_connect=lambda mount: None, enabled=True,
-                 on_release=lambda mount: None, flip_hint=lambda: None):
+                 on_release=lambda mount: None, flip_hint=lambda: None, reference=lambda: None):
         self.cfg = cfg
+        self.backend = cfg.get("backend", "synscan")
+        self.reference = reference  # 直結版の接続時に渡す向きの基準
         self.on_tick = on_tick
         self.on_connect = on_connect
         self.on_release = on_release  # シリアルを手放す直前に呼ぶ（裏返りの状態の保存など）
@@ -90,12 +95,20 @@ class MountSupervisor:
         self.wake.set()
 
     def _port(self):
+        if self.backend == "direct":
+            direct = self.cfg.get("direct", {})
+            if direct.get("port", "auto") != "auto":
+                return direct["port"]
+            ports = glob.glob(direct.get("port_glob", "/dev/serial/by-id/*SynHub*"))
+            return ports[0] if ports else None
         if self.cfg["port"] != "auto":
             return self.cfg["port"]
         ports = glob.glob("/dev/serial/by-id/*Serial*")
         return ports[0] if ports else None
 
     def _connect(self, port):
+        if self.backend == "direct":
+            return DirectMount(port, self.cfg.get("direct", {}), reference=self.reference())
         backlash = self.cfg.get("backlash")
         return Mount(port, self.cfg["max_rate"], self.cfg["az_limit"], self.cfg["alt_limit"],
                      backlash=backlash,
@@ -261,6 +274,20 @@ def describe_plan(plan):
             f"高度が {low:.0f}〜{high:.0f}° の外、{plan['timeout']:.0f} 秒を超える、読み取りが飛ぶ")
 
 
+def describe_direct_plan(plan):
+    az = f"方位 {'東回り（右）' if plan['d_az'] >= 0 else '西回り（左）'}に {abs(plan['d_az']):.1f}°"
+    alt = f"高度 {'上' if plan['d_alt'] >= 0 else '下'}へ {abs(plan['d_alt']):.1f}°"
+    return (f"{az}、{alt}。基板の目標移動で動き、最後は + 向きから近づけます。止める条件: 範囲の外、"
+            f"時間切れ、読み取りの飛び・停滞・頼んでいない動き")
+
+
+def distance_km(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371.0 * math.asin(math.sqrt(h))
+
+
 def create_app(cfg):
     camera = Camera(cfg["camera"]["device"], cfg["server"]["mediamtx_api"])
     finder_cfg = cfg["finder"]
@@ -271,6 +298,25 @@ def create_app(cfg):
     site = {"elevation_m": 0.0, "source": "config", **cfg["site"], **(store.get()["site"] or {})}
     sky = Sky(site["latitude"], site["longitude"], site["elevation_m"])
     notice = {"message": ""}
+    direct = cfg["mount"].get("backend", "synscan") == "direct"
+    direct_cfg = cfg["mount"].get("direct", {})
+
+    def reference_of(state):
+        """直結版の向きの基準。登録したアラインメント（北・水平、目標、星）のずれをそのまま使う。"""
+        current = state["alignment"]
+        if not current:
+            return None
+        return Reference(kind=current.get("source", "star"), az_offset=current["az_offset"],
+                         alt_offset=current["alt_offset"], label=current.get("label", current.get("star", "")))
+
+    def apply_reference():
+        mount = supervisor.mount
+        if direct and mount:
+            mount.set_reference(reference_of(store.get()))
+
+    def landmarks_here():
+        return [m for m in direct_cfg.get("landmarks", [])
+                if distance_km(site["latitude"], site["longitude"], m["latitude"], m["longitude"]) <= m.get("radius_km", 1.0)]
 
     def check_alignment(mount):
         # 架台の電源が入り直されると読み取りが 0 に戻るので、古い校正を使わない。
@@ -313,6 +359,14 @@ def create_app(cfg):
             store.update(mount_flip=current)
 
     def on_mount_tick(mount):
+        if direct:
+            # 見張りが未初期化への戻り（瞬断など）を見つけると、架台は制限モードに戻る。登録も外す
+            if mount.status()["restricted"] and store.get()["alignment"]:
+                store.update(alignment=None)
+                notice["message"] = "架台の初期化が外れたため、向きの基準を解除しました。選び直してください"
+                print(notice["message"], flush=True)
+            update_tracking(mount)
+            return
         check_alignment(mount)
         # 架台の電源の入れ直しなどで、SynScan のアライメントが外れることがある
         check_synscan(mount)
@@ -338,6 +392,13 @@ def create_app(cfg):
             print(f"synscan aligned: {aligned}", flush=True)
 
     def on_mount_connect(mount):
+        if direct:
+            if mount.fresh_power_on and store.get()["alignment"]:
+                store.update(alignment=None)
+                notice["message"] = "架台の電源が入り直されたので、向きの基準を選び直してください"
+                print(notice["message"], flush=True)
+            mount.set_reference(reference_of(store.get()))
+            return
         check_synscan(mount)
         synscan["mode"] = mount.tracking_mode()
 
@@ -346,13 +407,14 @@ def create_app(cfg):
         `z` が本当の方位・高度なので、差 0 の校正として扱う。"""
         if state["alignment"]:
             return state["alignment"]
-        if state.get("synscan_aligned"):
+        if not direct and state.get("synscan_aligned"):
             return SYNSCAN_ALIGNMENT
         return None
 
     supervisor = MountSupervisor(cfg["mount"], on_mount_tick, on_mount_connect,
                                  enabled=store.get().get("mount_enabled", True),
-                                 on_release=save_flip, flip_hint=lambda: store.get().get("mount_flip"))
+                                 on_release=save_flip, flip_hint=lambda: store.get().get("mount_flip"),
+                                 reference=lambda: reference_of(store.get()))
 
     def guide_context():
         recording = store.get()["recording"]
@@ -567,7 +629,10 @@ def create_app(cfg):
         except COMM_ERRORS as e:
             return JSONResponse({"error": str(e)}, 503)
         result = alignment_model.register(star, sky.altaz(star), status_now["raw"], clock)
+        if direct:
+            result.update(source="star", label=ALIGNMENT_STARS[star])
         store.update(alignment=result)
+        apply_reference()
         notice["message"] = ""
         print(f"aligned on {star}: az_offset={result['az_offset']:.4f} alt_offset={result['alt_offset']:.4f}", flush=True)
         return result
@@ -575,7 +640,49 @@ def create_app(cfg):
     @app.delete("/api/alignment")
     def clear_alignment():
         store.update(alignment=None)
+        apply_reference()
         return {"ok": True}
+
+    @app.get("/api/reference")
+    def get_reference():
+        """直結版の向きの基準の選択肢。北・水平で電源を入れた（既定）と、この観測地に登録した目標。"""
+        mount = supervisor.mount
+        return {"backend": "direct" if direct else "synscan",
+                "current": mount.status().get("reference") if mount and direct else None,
+                "restricted": mount.status().get("restricted") if mount and direct else None,
+                "options": [{"kind": "power_on", "label": "北・水平で電源を入れた"}]
+                           + [{"kind": "landmark", "key": m["key"], "label": m["label"], "az": m["az"], "alt": m["alt"]}
+                              for m in landmarks_here()]}
+
+    @app.post("/api/reference")
+    def set_reference(request: Request, body: dict = Body(...)):
+        """向きの基準を決める。landmark は、その目標を映像の中心に入れてから呼ぶ。"""
+        if not direct:
+            return JSONResponse({"error": "向きの基準は直結版だけの機能です"}, 400)
+        mount = supervisor.mount
+        if mount is None:
+            return JSONResponse({"error": "架台に接続していません"}, 503)
+        status_now = mount.status()
+        if status_now["moving"] or status_now["goto"]:
+            return JSONResponse({"error": "止まってから選んでください"}, 409)
+        kind = body.get("kind")
+        now = time.time()
+        if kind == "power_on":
+            result = {"star": "power_on", "source": "power_on", "label": "北・水平で電源投入", "time": now,
+                      "az_offset": 0.0, "alt_offset": 0.0, "clock_offset": mount.clock() - now}
+        elif kind == "landmark":
+            mark = next((m for m in landmarks_here() if m["key"] == body.get("key")), None)
+            if mark is None:
+                return JSONResponse({"error": "この観測地で使える目標ではありません"}, 400)
+            result = alignment_model.register(mark["key"], (mark["az"], mark["alt"]), status_now["raw"], mount.clock(), now)
+            result.update(source="landmark", label=mark["label"])
+        else:
+            return JSONResponse({"error": "kind は power_on か landmark です"}, 400)
+        store.update(alignment=result)
+        apply_reference()
+        notice["message"] = ""
+        print(f"reference {kind} from {request.client.host if request.client else '?'}: {result}", flush=True)
+        return result
 
     @app.get("/api/site")
     def get_site():
@@ -658,6 +765,8 @@ def create_app(cfg):
         target, info = lookup_target(query)
         if target["key"] == "sun":
             raise TargetError("太陽には向けません")
+        if direct:
+            return target, info, make_direct_plan(mount, target, info)
         if not store.get().get("synscan_aligned") or not mount.synscan_aligned():
             raise TargetError("SynScan 本体のアライメントが済んでいないので、自動導入は使えません")
         status_now = mount.status()
@@ -669,6 +778,38 @@ def create_app(cfg):
         plan = goto_plan(status_now["raw"], {"az": info["az"], "alt": info["alt"]},
                          {"az": status_now["az"], "alt": status_now["alt"]}, status_now["limits"], target["label"])
         return target, info, plan
+
+    def make_direct_plan(mount, target, info):
+        """直結版の導入の計画。目標の本当の方位・高度を、基準のずれで軸の角度に直す。"""
+        status_now = mount.status()
+        if status_now["restricted"]:
+            raise TargetError("向きの基準を選ぶまで、導入は使えません")
+        if status_now["fault"]:
+            raise TargetError(f"見張りが止めた状態です（{status_now['fault']}）。停止ボタンで解除してください")
+        current = store.get()["alignment"]
+        if info["alt"] < GOTO_MIN_ALT:
+            raise TargetError(f"目標の高度が {info['alt']:.1f}° で、{GOTO_MIN_ALT:.0f}° より低いので導入しません")
+        if info["alt"] > DIRECT_GOTO_MAX_ALT:
+            raise TargetError(f"目標の高度が {info['alt']:.1f}° で、{DIRECT_GOTO_MAX_ALT:.0f}° より高いので導入しません")
+        here = status_now["raw"]
+        d_az = alignment_model.wrap180(info["az"] - current["az_offset"] - here["az"])
+        d_alt = info["alt"] - current["alt_offset"] - here["alt"]
+        if abs(d_az) > GOTO_MAX_DEG or abs(d_alt) > GOTO_MAX_DEG:
+            raise TargetError(f"移動が大きすぎます（方位 {d_az:+.1f}°、高度 {d_alt:+.1f}°）。"
+                              f"各軸 {GOTO_MAX_DEG:.0f}° 以内になるよう、途中の天体を経由してください")
+        axis_target = {"az": here["az"] + d_az, "alt": here["alt"] + d_alt}
+        try:
+            for axis, value in axis_target.items():
+                mount.envelope.check_target(axis, value)
+            sun_az, sun_alt = sky.altaz("sun")
+            check_sun(mount.safety, mount.reference, axis_target, (float(sun_az), float(sun_alt)))
+        except SafetyError as e:
+            raise TargetError(str(e))
+        point = alignment_model.pointing(current, here)
+        return {"label": target["label"], "from": point, "to": {"az": info["az"], "alt": info["alt"]},
+                "d_az": d_az, "d_alt": d_alt, "az_direction": 1 if d_az >= 0 else -1, "az_amount": abs(d_az),
+                "alt_range": [min(point["alt"], info["alt"]), max(point["alt"], info["alt"])],
+                "timeout": None, "axis_target": axis_target, "backend": "direct"}
 
     @app.post("/api/goto/plan")
     def plan_goto(body: dict = Body(...)):
@@ -686,7 +827,8 @@ def create_app(cfg):
             del goto_plans[key]
         plan_id = os.urandom(8).hex()
         goto_plans[plan_id] = {"query": body.get("target"), "plan": plan, "time": now}
-        return {"plan_id": plan_id, "plan": plan, "target": info, "text": describe_plan(plan)}
+        text = describe_direct_plan(plan) if direct else describe_plan(plan)
+        return {"plan_id": plan_id, "plan": plan, "target": info, "text": text}
 
     @app.post("/api/goto")
     def run_goto(request: Request, body: dict = Body(...)):
@@ -703,10 +845,15 @@ def create_app(cfg):
             if (abs(plan["d_az"] - old["d_az"]) > GOTO_REPLAN_TOLERANCE
                     or abs(plan["d_alt"] - old["d_alt"]) > GOTO_REPLAN_TOLERANCE):
                 return JSONResponse({"error": "確認した後に架台の位置が変わりました。もう一度計画を確認してください"}, 409)
-            ra, dec = sky.radec_j2000(target)
-            print(f"goto requested by {request.client.host if request.client else '?'}: {describe_plan(plan)}", flush=True)
+            print(f"goto requested by {request.client.host if request.client else '?'}: "
+                  f"{describe_direct_plan(plan) if direct else describe_plan(plan)}", flush=True)
             clear_tracking()
-            mount.start_goto(ra, dec, plan)
+            if direct:
+                mount.stop("導入の前に停止")
+                mount.goto_axes(plan["axis_target"], target["label"])
+            else:
+                ra, dec = sky.radec_j2000(target)
+                mount.start_goto(ra, dec, plan)
             synscan["label"] = target["label"]
         except TargetError as e:
             return JSONResponse({"error": str(e)}, 409)

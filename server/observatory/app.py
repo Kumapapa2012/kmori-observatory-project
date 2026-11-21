@@ -360,8 +360,8 @@ def create_app(cfg):
 
     def on_mount_tick(mount):
         if direct:
-            # 見張りが未初期化への戻り（瞬断など）を見つけると、架台は制限モードに戻る。登録も外す
-            if mount.status()["restricted"] and store.get()["alignment"]:
+            # 見張りが未初期化への戻り（瞬断など）を見つけると、架台は基準を外す。登録も外す
+            if not mount.status()["referenced"] and store.get()["alignment"]:
                 store.update(alignment=None)
                 notice["message"] = "架台の初期化が外れたため、向きの基準を解除しました。選び直してください"
                 print(notice["message"], flush=True)
@@ -650,6 +650,7 @@ def create_app(cfg):
         return {"backend": "direct" if direct else "synscan",
                 "current": mount.status().get("reference") if mount and direct else None,
                 "restricted": mount.status().get("restricted") if mount and direct else None,
+                "referenced": mount.status().get("referenced") if mount and direct else None,
                 "options": [{"kind": "power_on", "label": "北・水平で電源を入れた"}]
                            + [{"kind": "landmark", "key": m["key"], "label": m["label"], "az": m["az"], "alt": m["alt"]}
                               for m in landmarks_here()]}
@@ -782,7 +783,7 @@ def create_app(cfg):
     def make_direct_plan(mount, target, info):
         """直結版の導入の計画。目標の本当の方位・高度を、基準のずれで軸の角度に直す。"""
         status_now = mount.status()
-        if status_now["restricted"]:
+        if not status_now["referenced"]:
             raise TargetError("向きの基準を選ぶまで、導入は使えません")
         if status_now["fault"]:
             raise TargetError(f"見張りが止めた状態です（{status_now['fault']}）。停止ボタンで解除してください")

@@ -5,7 +5,10 @@
 - 向きの基準: 既定は北・水平で電源を入れた（軸の 0 が北・水平）。観測地に登録した目標
   （自宅ではスカイツリー）で合わせることもできる。基準を選ぶまでは制限モード。
 - 範囲: 高度 −5°〜+92°（本当の高度）、方位は軸の 0 から ±180°（ケーブルの巻き付き防止）。
-  制限モードでは軸の 0 から方位 ±30°、高度 ±20°、低速だけ。
+  制限モード（restricted_mode、既定は無効、2026-11-21 決定）を有効にすると、基準を選ぶまで
+  軸の 0 から方位 ±30°、高度 ±20°、低速だけ。無効なら基準がなくても、電源投入時の姿勢を
+  水平とみなして同じ範囲で動ける（アラインメントで離れた星へ向けるため）。導入と太陽の判定は
+  基準を選ぶまで使えない。
 - 見張り: 飛び、頼んでいない動き、電源の瞬断、停滞、読み取りの失敗の続き。
 """
 import math
@@ -40,6 +43,7 @@ class SafetyConfig:
     stall_min_rate: float = 0.05  # これより遅い動きは停滞の判定をしない（度/秒）
     max_read_failures: int = 3
     sun_min_sep: float = 15.0
+    restricted_mode: bool = False  # True なら基準を選ぶまで狭い範囲・低速に絞る
 
     @classmethod
     def from_dict(cls, d):
@@ -74,8 +78,13 @@ class Envelope:
         self.reference = reference or Reference()
 
     @property
+    def referenced(self):
+        """本当の方位・高度が分かっているか（基準を選んだか）。"""
+        return self.reference.kind is not None
+
+    @property
     def restricted(self):
-        return self.reference.kind is None
+        return not self.referenced and self.cfg.restricted_mode
 
     def axis_range(self, axis):
         c = self.cfg

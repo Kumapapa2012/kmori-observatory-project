@@ -58,8 +58,18 @@ class MotorBoardTest(unittest.TestCase):
 
 
 class SafetyTest(unittest.TestCase):
+    def test_no_reference_uses_power_on_pose_by_default(self):
+        env = Envelope(SafetyConfig())  # 制限モードは既定で無効
+        self.assertFalse(env.referenced)
+        self.assertFalse(env.restricted)
+        self.assertEqual(env.axis_range("az"), (-180.0, 180.0))
+        self.assertEqual(env.axis_range("alt"), (-5.0, 92.0))
+        self.assertEqual(env.max_rate(), 3.0)
+        with self.assertRaises(SafetyError):
+            env.check_target("alt", 93.0)
+
     def test_restricted_until_reference(self):
-        env = Envelope(SafetyConfig())
+        env = Envelope(SafetyConfig(restricted_mode=True))
         self.assertTrue(env.restricted)
         self.assertEqual(env.axis_range("az"), (-30.0, 30.0))
         self.assertEqual(env.axis_range("alt"), (-20.0, 20.0))
@@ -134,7 +144,8 @@ class DirectMountTest(unittest.TestCase):
         self.assertTrue(all(a.initialized for a in self.fake.axes.values()))
         moves = [c for a in self.fake.axes.values() for c in a.commands if c[0] in "GJH"]
         self.assertEqual(moves, [])
-        self.assertTrue(m.status()["restricted"])
+        self.assertFalse(m.status()["referenced"])
+        self.assertFalse(m.status()["restricted"])
 
     def test_wrong_cpr_refuses(self):
         self.fake = FakeMotorBoard()
@@ -150,7 +161,7 @@ class DirectMountTest(unittest.TestCase):
         self.assertIn("途切れた", m.status()["message"])
 
     def test_restricted_mode_caps_speed_and_range(self):
-        m = self.make()
+        m = self.make(safety={"restricted_mode": True})
         self.assertAlmostEqual(m.speed(9), 0.3)
         self.fake.axes["1"].pos = 29.9 * K
         m.monitor.last = None
@@ -161,6 +172,17 @@ class DirectMountTest(unittest.TestCase):
                 time.sleep(0.05)
                 m.move("az", 1, 9)
         self.assertLess(self.pos("az"), 30.1)
+
+    def test_no_reference_moves_past_restricted_range(self):
+        m = self.make()  # 基準なし、制限モードは無効
+        self.fake.axes["1"].pos = 29.9 * K
+        m.monitor.last = None
+        time.sleep(0.15)
+        for _ in range(10):
+            m.move("az", 1, 9)
+            time.sleep(0.05)
+        self.assertTrue(wait_for(lambda: self.pos("az") > 30.5))
+        m.stop()
 
     def test_range_end_stops_while_moving(self):
         m = self.make(reference=power_on_reference())
@@ -218,7 +240,7 @@ class DirectMountTest(unittest.TestCase):
         time.sleep(0.2)
         self.fake.power_glitch()
         self.assertTrue(wait_for(lambda: "未初期化" in m.status()["fault"]))
-        self.assertTrue(m.status()["restricted"])
+        self.assertFalse(m.status()["referenced"])
         m.stop()
         self.assertTrue(all(a.initialized for a in self.fake.axes.values()))
 

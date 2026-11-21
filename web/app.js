@@ -22,6 +22,25 @@ const POWER = {ok: [3, "電源 OK", "ok"], half: [2, "電源 半分", "warn"], l
 let latest = null;
 let wsOpen = false;
 
+// 直結版で基準を選んでいないときは、アラインメントの代わりにその状態を見せる
+function alignLabel(latest, aligned) {
+  if (aligned) return aligned.source === "synscan" ? "SynScan アライン済" : "アライン済";
+  const m = latest.mount;
+  if (m && m.backend === "direct" && !m.referenced) return m.restricted ? "制限モード" : "基準なし";
+  return "未アライン";
+}
+
+// 直結版の「範囲の端で停止」を、どの軸がどこまでかの文に直す
+function rangeStop(mount) {
+  const msg = mount.message || "";
+  if (mount.backend !== "direct" || !msg.includes("範囲の端")) return "";
+  const axis = msg.startsWith("alt") ? "alt" : "az";
+  const [lo, hi] = (mount.limits && mount.limits[axis]) || [];
+  const name = axis === "az" ? "方位" : "高度";
+  const range = lo === undefined ? "" : `（${lo.toFixed(0)}°〜${hi >= 0 ? "+" : ""}${hi.toFixed(0)}°${mount.referenced ? "" : "、電源投入時の姿勢から"}）`;
+  return `${name}が動ける範囲の端で止めました${range}。反対向きには動かせます`;
+}
+
 function recordingLabel(r) {
   const base = RECORDING[r.kind] || RECORDING.none;
   return r.kind === "timelapse" ? [base[0], `撮影中 ${r.count || 0} 枚`, base[2]] : base;
@@ -57,13 +76,16 @@ function render() {
   const power = POWER[live ? latest.power : "ok"] || POWER.ok;
   $("status").innerHTML =
     stateHtml(ICONS.plug, system[0], system[1]) +
-    (live ? stateHtml(ICONS.target, aligned ? (aligned.source === "synscan" ? "SynScan アライン済" : "アライン済") : "未アライン", aligned ? "ok" : "warn")
+    (live ? stateHtml(ICONS.target, alignLabel(latest, aligned), aligned ? "ok" : "warn")
           : stateHtml(ICONS.target, "不明", "idle")) +
     (live ? stateHtml(ICONS[rec[0]], rec[1], rec[2]) : stateHtml(ICONS.idle, "不明", "idle")) +
     (live ? stateHtml(ICONS.battery(power[0]), power[1], power[2]) : stateHtml(ICONS.battery(0), "不明", "idle"));
 
   const p = live && latest.pointing;
-  $("pointing").textContent = `方角 ${p ? p.az.toFixed(1) + "°" : "—"}　仰角 ${p ? p.alt.toFixed(1) + "°" : "—"}`;
+  const raw = live && !p && latest.mount && latest.mount.backend === "direct" && latest.mount.raw;
+  $("pointing").textContent = raw
+    ? `電源投入時から 方位 ${raw.az >= 0 ? "+" : ""}${raw.az.toFixed(1)}°　高度 ${raw.alt >= 0 ? "+" : ""}${raw.alt.toFixed(1)}°`
+    : `方角 ${p ? p.az.toFixed(1) + "°" : "—"}　仰角 ${p ? p.alt.toFixed(1) + "°" : "—"}`;
 
   const link = live ? latest.mount_connection : null;
   const linkButton = $("mount-link");
@@ -76,10 +98,15 @@ function render() {
   if (!wsOpen) notice = "サーバーに再接続しています";
   else if (link === "disconnected") notice = "架台との接続を切っています。SynScan を手元で操作できます";
   else if (mount && mount.error) notice = "架台の通信エラー: " + mount.error;
+  else if (mount && mount.fault) notice = `安全装置で停止: ${mount.fault}。停止ボタンで解除できます`;
+  else if (mount && rangeStop(mount)) notice = rangeStop(mount);
   else if (live && latest.notice) notice = latest.notice;
   else if (mount && mount.goto) notice = `${mount.goto.label}へ自動導入中  方位 ${mount.goto.progress.toFixed(1)}° / ${mount.goto.plan.az_amount.toFixed(1)}°`;
   else if (live && latest.tracking && trackingNotice(latest.tracking)) notice = trackingNotice(latest.tracking);
   else if (live && latest.recording.message) notice = latest.recording.message;
+  else if (mount && mount.backend === "direct" && !mount.referenced)
+    notice = mount.restricted ? "制限モード: 向きの基準を選ぶまで、狭い範囲を低速でだけ動かせます"
+                              : "向きの基準なし: 太陽を避ける判定と自動導入は使えません。太陽に向けないでください";
   else if (live) notice = "太陽に向けないでください";
   $("notice").textContent = notice;
 

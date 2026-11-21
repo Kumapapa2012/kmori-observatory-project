@@ -506,7 +506,7 @@ class DirectMount:
                 "raw": dict(self.positions), "alt_read": self.positions["alt"], "reported": dict(self.positions),
                 "flipped": False, "jumped": bool(self.fault),
                 "limits": {a: self.envelope.axis_range(a) for a in AXES}, "max_rate": self.max_rate,
-                "restricted": self.envelope.restricted,
+                "restricted": self.envelope.restricted, "referenced": self.envelope.referenced,
                 "reference": {"kind": ref.kind, "label": ref.label,
                               "az_offset": ref.az_offset, "alt_offset": ref.alt_offset},
                 "fault": self.fault, "fresh_power_on": self.fresh_power_on,

@@ -102,6 +102,8 @@ az = 0.5
 alt = 0.15
 
 [mount.direct.safety]
+# true にすると、向きの基準を選ぶまで軸の 0 から方位 ±30°、高度 ±20°、低速だけに絞る（既定 false）
+restricted_mode = false
 alt_min = -5.0
 alt_max = 92.0
 az_span = 180.0

@@ -69,13 +69,14 @@ class DirectApiTest(unittest.TestCase):
 
     def test_reference_options_and_power_on(self):
         _, ref = self.call("/api/reference", "GET")
-        self.assertTrue(ref["restricted"])
+        self.assertFalse(ref["referenced"])
+        self.assertFalse(ref["restricted"])
         kinds = [(o["kind"], o.get("key")) for o in ref["options"]]
         self.assertIn(("power_on", None), kinds)
         self.assertIn(("landmark", "skytree"), kinds)
         code, _ = self.call("/api/reference", "POST", _Req(), {"kind": "power_on"})
         self.assertEqual(code, 200)
-        self.assertFalse(self.mount.status()["restricted"])
+        self.assertTrue(self.mount.status()["referenced"])
         self.assertEqual(self.mount.reference.kind, "power_on")
 
     def test_landmark_sets_offsets(self):
@@ -106,10 +107,10 @@ class DirectApiTest(unittest.TestCase):
         self.call("/api/reference", "POST", _Req(), {"kind": "power_on"})
         time.sleep(0.2)
         self.fake.power_glitch()
-        self.assertTrue(wait_for(lambda: self.mount.status()["restricted"]))
+        self.assertTrue(wait_for(lambda: not self.mount.status()["referenced"]))
         self.supervisor.on_tick(self.mount)
         _, ref = self.call("/api/reference", "GET")
-        self.assertTrue(ref["restricted"])
+        self.assertFalse(ref["referenced"])
         self.assertIsNone(self.endpoint("/api/status", "GET")()["alignment"])
 
 

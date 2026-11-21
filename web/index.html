@@ -3,7 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <title>Observatory</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 </head><body>
 <div id="app">
   <!-- 表示は main（主鏡が大きくファインダーがワイプ）、finder（その逆）、split（横並び） -->
@@ -60,6 +60,20 @@
     <div class="note">北極星を画面中央の十字に合わせてから登録します。向きを変えた直後はガタが残るので、最後は上向き、右向きに動かして合わせます。</div>
     <div class="row"><button id="register">北極星を登録</button><button id="clear-align">解除</button><button id="close-align">閉じる</button></div>
     <table id="targets"></table>
+    <div class="title">プレートソルブ（ファインダー）</div>
+    <div class="note">見えている空を円盤の上で指でなぞります（上が北、右が東。もう一度なぞると外れます）。外側の円が地平線、内側の点線が高度の下限です。架台はこの範囲の高度 30〜50°（橙の円の間）の 3 点へ自動で動き、ファインダーの写真を ASTAP で解いて向きと傾きを求めます。</div>
+    <div class="sky-mask-row">
+      <canvas id="sky-mask" width="240" height="240" aria-label="見えている空の範囲"></canvas>
+      <div class="sky-mask-side">
+        <label>高度の下限 <input type="number" id="sky-min-alt" min="0" max="70" step="5" value="20">°</label>
+        <button id="sky-all">全方位</button>
+        <button id="sky-save">空の範囲を保存</button>
+        <div id="sky-state" class="note"></div>
+      </div>
+    </div>
+    <div class="row"><button id="plate-start" class="go">アラインメント開始</button><button id="plate-cancel">中止</button></div>
+    <div id="plate-state" class="note"></div>
+    <table id="plate-points"></table>
     <div class="title">観測地</div>
     <div class="row site">
       <label>緯度 <input type="number" id="site-lat" step="0.000001"></label>
@@ -101,7 +115,7 @@
     <div class="row"><button id="goto-plan" disabled>自動導入の計画を見る</button></div>
     <label><input type="checkbox" id="track-guide" checked> 映像で補正する（手動露出で白飛びさせないこと）</label>
     <div class="row"><button id="track-start" disabled>この天体を追尾</button><button id="track-synscan">SynScan の追尾に戻す</button></div>
-    <div class="note">導入は SynScan 本体のアライメント済みのときだけ使えます。追尾は視野に入れてから開始します。追尾中もスティックで微調整でき、離すと追尾に戻ります（SynScan の追尾はスティックで切れるので、「SynScan の追尾に戻す」で戻します）。</div>
+    <div class="note">導入はアラインメント済みのときだけ使えます。直結版では導入のあとファインダーで解いて中央へ寄せ、そのまま追尾を始めます。追尾中もスティックで微調整でき、離すと追尾に戻ります（SynScan の追尾はスティックで切れるので、「SynScan の追尾に戻す」で戻します）。</div>
     <div class="row"><button id="stop-track">追尾を止める</button><button id="close-track">閉じる</button></div>
   </div>
 
@@ -133,5 +147,5 @@
   <button id="stop">停止</button>
 </div>
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="app.js?v=12"></script>
+<script src="app.js?v=16"></script>
 </body></html>

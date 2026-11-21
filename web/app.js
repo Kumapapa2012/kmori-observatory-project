@@ -59,7 +59,16 @@ function trackingNotice(t) {
   return `${t.label}を追尾中  ${seconds}補正 ${g.correction.az.toFixed(2)}, ${g.correction.alt.toFixed(2)}"/秒`;
 }
 
+// 導入のあとファインダーで解いて寄せる処理の表示。終わってから 20 秒は結果を残す
+function centeringNotice(latest) {
+  const c = latest.centering;
+  if (!c) return "";
+  if (c.state === "running") return `${c.label}: ${c.message}`;
+  if (c.ended && latest.time - c.ended < 20 && c.state !== "cancelled") return c.message;
+  return "";
+}
 function render() {
+  renderPlate();
   let system;
   if (!wsOpen) system = ["サーバー 切断", "bad"];
   else if (!latest) system = ["確認中", "idle"];
@@ -101,6 +110,7 @@ function render() {
   else if (mount && mount.fault) notice = `安全装置で停止: ${mount.fault}。停止ボタンで解除できます`;
   else if (mount && rangeStop(mount)) notice = rangeStop(mount);
   else if (live && latest.notice) notice = latest.notice;
+  else if (live && centeringNotice(latest)) notice = centeringNotice(latest);
   else if (mount && mount.goto) notice = `${mount.goto.label}へ自動導入中  方位 ${mount.goto.progress.toFixed(1)}° / ${mount.goto.plan.az_amount.toFixed(1)}°`;
   else if (live && latest.tracking && trackingNotice(latest.tracking)) notice = trackingNotice(latest.tracking);
   else if (live && latest.recording.message) notice = latest.recording.message;
@@ -472,14 +482,17 @@ async function refreshAlign() {
     $("align-state").textContent = `観測地 ${r.site.latitude.toFixed(5)}° ${r.site.longitude.toFixed(5)}°（${SITE_SOURCE[r.site.source] || ""}）　` +
       (!a ? "未登録"
         : a.source === "synscan" ? "SynScan 本体のアライメントを使用中（架台の値をそのまま表示）"
-        : `${new Date(a.time * 1000).toLocaleTimeString()} に ${a.star === "polaris" ? "北極星" : a.star} で登録済み`);
+        : a.source === "plate"
+          ? `${new Date(a.time * 1000).toLocaleTimeString()} に${a.label}で登録済み（最大の誤差 ${(Math.max(...a.errors) * 60).toFixed(1)}′、` +
+            `傾き ${Math.hypot(a.tilt_x || 0, a.tilt_y || 0).toFixed(2)}°）`
+          : `${new Date(a.time * 1000).toLocaleTimeString()} に ${a.star === "polaris" ? "北極星" : (a.label || a.star)} で登録済み`);
     $("targets").innerHTML = `<tr><th>天体</th><th>方角</th><th>仰角</th><th>方角の差</th><th>仰角の差</th></tr>` +
       r.targets.map(t => `<tr><td>${t.label}</td><td>${t.az.toFixed(2)}°</td><td>${t.alt.toFixed(2)}°</td>` +
         `<td>${t.daz === undefined ? "—" : signed(t.daz)}</td><td>${t.dalt === undefined ? "—" : signed(t.dalt)}</td></tr>`).join("");
   } catch (e) { $("align-state").textContent = "サーバーに接続できません"; }
 }
 setInterval(refreshAlign, 2000);
-$("open-align").addEventListener("click", () => { $("align").hidden = false; activate($("align")); refreshAlign(); loadSite(); });
+$("open-align").addEventListener("click", () => { $("align").hidden = false; activate($("align")); refreshAlign(); loadSite(); loadSkyMask(); });
 $("close-align").addEventListener("click", () => { stopMeasure(); activate(null); });
 
 // 観測地。入力欄は開いたときと保存したときだけ埋め、入力中の値を定期更新で消さない
@@ -596,6 +609,117 @@ $("clear-align").addEventListener("click", async () => {
   await fetch("/api/alignment", {method: "DELETE"});
   refreshAlign();
 });
+
+// プレートソルブの空の範囲。方位 10° ごとの扇を指でなぞって切り替える。最初に触れた扇の逆の状態で塗る
+let skyMask = {bins: Array(36).fill(true), min_alt: 20}, skyPaint = null;
+function drawSkyMask() {
+  const c = $("sky-mask"), g = c.getContext("2d"), r = c.width / 2 - 14, cx = c.width / 2, cy = c.height / 2;
+  g.clearRect(0, 0, c.width, c.height);
+  const style = getComputedStyle(document.body);
+  for (let i = 0; i < 36; i++) {
+    // 北が上、東が右（方位は北から東回り。画面の角度は右が 0 で下回り）
+    const a0 = (i * 10 - 90) * Math.PI / 180, a1 = ((i + 1) * 10 - 90) * Math.PI / 180;
+    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, r, a0, a1); g.closePath();
+    g.fillStyle = skyMask.bins[i] ? "rgba(90,160,255,0.45)" : "rgba(120,120,120,0.15)";
+    g.fill();
+  }
+  g.strokeStyle = style.color || "#ccc"; g.lineWidth = 1;
+  g.beginPath(); g.arc(cx, cy, r, 0, 2 * Math.PI); g.stroke();
+  g.setLineDash([4, 4]);
+  g.beginPath(); g.arc(cx, cy, r * (90 - skyMask.min_alt) / 90, 0, 2 * Math.PI); g.stroke();
+  g.setLineDash([]);
+  // 点を置く高度の帯（設定の alt_band。進行の状態が来る前は既定の 30〜50°）
+  const band = (latest && latest.plate_alignment && latest.plate_alignment.alt_band) || [30, 50];
+  g.strokeStyle = "rgba(255,200,80,0.6)";
+  band.forEach(alt => { g.beginPath(); g.arc(cx, cy, r * (90 - alt) / 90, 0, 2 * Math.PI); g.stroke(); });
+  g.fillStyle = style.color || "#ccc"; g.font = "11px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+  [["北", 0], ["東", 90], ["南", 180], ["西", 270]].forEach(([t, az]) => {
+    const a = (az - 90) * Math.PI / 180;
+    g.fillText(t, cx + (r + 8) * Math.cos(a), cy + (r + 8) * Math.sin(a));
+  });
+  const p = latest && latest.pointing;
+  if (p) {
+    const a = (p.az - 90) * Math.PI / 180, d = r * Math.max(0, 90 - p.alt) / 90;
+    g.beginPath(); g.arc(cx + d * Math.cos(a), cy + d * Math.sin(a), 4, 0, 2 * Math.PI); g.fillStyle = "#f55"; g.fill();
+  }
+  const pa = latest && latest.plate_alignment;
+  (pa ? pa.points : []).forEach((pt, i) => {
+    const a = (pt.az - 90) * Math.PI / 180, d = r * (90 - pt.alt) / 90;
+    g.fillStyle = pt.state === "solved" ? "#7fd17f" : pt.state === "failed" ? "#e08a8a" : "#ffd27f";
+    g.fillText(String(i + 1), cx + d * Math.cos(a), cy + d * Math.sin(a));
+  });
+}
+function skyBinAt(e) {
+  const c = $("sky-mask"), rect = c.getBoundingClientRect();
+  let x = e.clientX - (rect.left + rect.width / 2);
+  let y = e.clientY - (rect.top + rect.height / 2);
+  // 縦持ちでは画面全体を 90° 回しているので、画面の座標を戻す（十字キーと同じ）
+  if (window.matchMedia("(orientation: portrait)").matches) [x, y] = [y, -x];
+  if (Math.hypot(x, y) < 12) return null;
+  const az = (Math.atan2(y, x) * 180 / Math.PI + 90 + 360) % 360;
+  return Math.floor(az / 10) % 36;
+}
+$("sky-mask").addEventListener("pointerdown", e => {
+  const i = skyBinAt(e);
+  if (i === null) return;
+  $("sky-mask").setPointerCapture(e.pointerId);
+  skyPaint = !skyMask.bins[i];
+  skyMask.bins[i] = skyPaint;
+  $("sky-state").textContent = "未保存";
+  drawSkyMask();
+});
+$("sky-mask").addEventListener("pointermove", e => {
+  if (skyPaint === null) return;
+  const i = skyBinAt(e);
+  if (i === null || skyMask.bins[i] === skyPaint) return;
+  skyMask.bins[i] = skyPaint;
+  drawSkyMask();
+});
+["pointerup", "pointercancel"].forEach(t => $("sky-mask").addEventListener(t, () => { skyPaint = null; }));
+$("sky-min-alt").addEventListener("input", e => {
+  const v = +e.target.value;
+  if (isFinite(v)) { skyMask.min_alt = Math.min(70, Math.max(0, v)); $("sky-state").textContent = "未保存"; drawSkyMask(); }
+});
+$("sky-all").addEventListener("click", () => { skyMask.bins = Array(36).fill(true); $("sky-state").textContent = "未保存"; drawSkyMask(); });
+async function loadSkyMask() {
+  try {
+    skyMask = await (await fetch("/api/sky-mask")).json();
+    $("sky-min-alt").value = skyMask.min_alt;
+    $("sky-state").textContent = "";
+  } catch (e) { $("sky-state").textContent = "サーバーに接続できません"; }
+  drawSkyMask();
+}
+async function saveSkyMask() {
+  const r = await (await postJson("/api/sky-mask", skyMask)).json();
+  $("sky-state").textContent = r.error || "保存しました";
+  return !r.error;
+}
+$("sky-save").addEventListener("click", saveSkyMask);
+$("plate-start").addEventListener("click", async () => {
+  if ($("sky-state").textContent === "未保存" && !(await saveSkyMask())) return;
+  try {
+    const r = await (await postJson("/api/alignment/plate", {})).json();
+    $("plate-state").textContent = r.error || "開始しました";
+  } catch (e) { $("plate-state").textContent = "サーバーに接続できません"; }
+});
+$("plate-cancel").addEventListener("click", async () => { await fetch("/api/alignment/plate", {method: "DELETE"}); });
+const PLATE_POINT = {moving: "移動中", solving: "解析中", solved: "解けた", failed: "解けず"};
+function renderPlate() {
+  if ($("align").hidden) return;
+  const pa = latest && latest.plate_alignment;
+  const running = pa && pa.state === "running";
+  $("plate-start").disabled = !!running;
+  $("plate-cancel").disabled = !running;
+  if (pa) {
+    $("plate-state").textContent = pa.message +
+      (pa.max_error !== null && pa.max_error !== undefined ? `　最大の誤差 ${(pa.max_error * 60).toFixed(1)}′` : "");
+    $("plate-points").innerHTML = pa.points.length ? `<tr><th>点</th><th>方位</th><th>高度</th><th>状態</th><th>誤差</th></tr>` +
+      pa.points.map((p, i) => `<tr><td>${i + 1}</td><td>${p.az.toFixed(0)}°</td><td>${p.alt.toFixed(0)}°</td>` +
+        `<td class="${p.state}">${PLATE_POINT[p.state] || p.state}</td>` +
+        `<td>${p.error === null || p.error === undefined ? "—" : (p.error * 60).toFixed(1) + "′"}</td></tr>`).join("") : "";
+  }
+  if (skyPaint === null) drawSkyMask();
+}
 
 // 撮影のダイアログ。状態はホストが持ち、ここでは表示と指示だけを行う
 const postJson = (url, body) => fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});

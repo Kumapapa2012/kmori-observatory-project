@@ -6,7 +6,9 @@ from pathlib import Path
 
 # finder はファインダーの映像の中で主鏡の中心が写る位置（幅と高さに対する割合）
 # site は画面から保存した観測地で、None なら設定ファイルの値を使う
-DEFAULT = {"site": None, "alignment": None, "recording": {"kind": "none"}, "finder": {"x": 0.5, "y": 0.5}}
+# sky_mask は見えている空の範囲（plate.py、方位 10° ごとの可否と高度の下限）で、None なら全方位
+DEFAULT = {"site": None, "alignment": None, "recording": {"kind": "none"}, "finder": {"x": 0.5, "y": 0.5},
+           "sky_mask": None}
 
 
 class StateStore:

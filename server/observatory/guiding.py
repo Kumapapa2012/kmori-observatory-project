@@ -99,6 +99,16 @@ def apply_correction(base, correction):
     return 0.0 if base * total < 0 else total
 
 
+def hold_correction(error, gain=0.05, limit=60.0, dead_band=0.002):
+    """追尾中に、保つべき位置との差（度）を詰める速さ（秒角/秒）。
+
+    速さだけの追尾は、計算の丸めや基板の速さの刻みでずれが積もる。差に gain（1/秒）を掛けた速さで
+    詰め（0.1° なら 18″/秒、約 20 秒で詰まる）、limit を超えないようにする。dead_band 未満は 0。"""
+    if abs(error) < dead_band:
+        return 0.0
+    return max(-limit, min(limit, error * gain * 3600.0))
+
+
 class FrameReader:
     """配信から縮小したキーフレームだけを読む。デコードの負荷を抑えるため 1 秒に 1 枚程度になる。"""
 

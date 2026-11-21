@@ -19,9 +19,10 @@ from . import alignment as alignment_model
 from .camera import Camera
 from .capture import Capture, CaptureError
 from .config import ROOT, resolve
-from .guiding import FrameReader, Guider, apply_correction, field_rotation_rate
+from .guiding import FrameReader, Guider, apply_correction, field_rotation_rate, hold_correction
 from .direct_mount import DirectMount
 from .mount import Mount, MountError
+from . import plate as plate_model
 from .safety import Reference, SafetyError, check_sun
 from .sky import LABELS, Sky, TargetError, format_radec
 from .sky import resolve as resolve_target
@@ -47,6 +48,17 @@ GOTO_ALT_MARGIN = 5.0  # 途中の高度が、出発と目標の間からはみ�
 GOTO_PLAN_TTL = 120.0  # 計画を確認してから実行できるまでの時間（秒）
 GOTO_REPLAN_TOLERANCE = 3.0  # 確認した計画と実行時の計画の差の上限（度）
 DIRECT_GOTO_MAX_ALT = 88.0  # 直結版は天頂付近でも読み取りが裏返らない（2026-11-14 に 93° まで確認）
+# 追尾を始めるとき、目標の計算上の位置からこれ以上離れていたら断り、先に導入してもらう（度）。
+# 十字キーで合わせた分（向きの基準のずれ）は、この範囲なら追尾の間そのまま保つ。
+# 北・水平で電源を入れた基準は 2026-11-21 に方位で約 8° ずれていたので、それを含む広さにする
+TRACK_MAX_OFFSET = 15.0
+# 十字キーを離してから止まりきるまで、追尾で保つ差を今の向きに合わせ続ける時間（秒）
+HOLD_FOLLOW_SECONDS = 1.5
+# プレートソルブのアラインメントを始めてよい太陽の高度の上限（度）
+PLATE_MAX_SUN_ALT = -8.0
+# アラインメント中に月から離す角度（度）。月明かりでファインダーの星が埋もれる
+PLATE_MOON_SEP = 20.0
+FINDER_RTSP = "rtsp://127.0.0.1:8554/finder"
 
 
 class MountSupervisor:
@@ -307,7 +319,8 @@ def create_app(cfg):
         if not current:
             return None
         return Reference(kind=current.get("source", "star"), az_offset=current["az_offset"],
-                         alt_offset=current["alt_offset"], label=current.get("label", current.get("star", "")))
+                         alt_offset=current["alt_offset"], label=current.get("label", current.get("star", "")),
+                         tilt_x=current.get("tilt_x", 0.0), tilt_y=current.get("tilt_y", 0.0))
 
     def apply_reference():
         mount = supervisor.mount
@@ -328,12 +341,16 @@ def create_app(cfg):
             print(notice["message"], flush=True)
 
     # target は resolve() の結果。サーバーが計算した速度で追尾する
-    tracking = {"target": None}
+    # hold は追尾を始めたときの目標との差（軸の角度、度）。直結版で基準があるときだけ使う
+    # follow は十字キーで動かした軸と、保つ差を追いかけ続ける期限（time.monotonic()）
+    tracking = {"target": None, "hold": None, "follow": {}}
     synscan = {"mode": None, "label": None}  # SynScan 本体の追尾（`t`）と、その対象の名前
     goto_plans = {}
 
     def clear_tracking():
         tracking["target"] = None
+        tracking["hold"] = None
+        tracking["follow"] = {}
         guider.stop()
 
     def update_tracking(mount):
@@ -345,8 +362,44 @@ def create_app(cfg):
             return
         az, alt = sky.rates(tracking["target"])
         correction = guider.correction()
+        now = time.monotonic()
+        for axis in mount.status()["moving"]:
+            # 十字キーで動かしている軸は、離して止まりきったときの向きを新しく保つ（追尾は離すと戻る）
+            tracking["follow"][axis] = now + HOLD_FOLLOW_SECONDS
+        following = [a for a, until in tracking["follow"].items() if now < until]
+        if tracking["hold"] and following:
+            offset = track_offset(mount, tracking["target"])
+            if offset:
+                for axis in following:
+                    tracking["hold"][axis] = offset[axis]
+        if tracking["hold"] and guider.snapshot()["state"] == "off":
+            # 映像で補正しないときは、追尾を始めたときの目標との差を保つ（速さだけだとずれが積もる）
+            offset = track_offset(mount, tracking["target"])
+            if offset:
+                cap = mount.safety.track_max_rate * 3600.0 * 0.9
+                rates = {"az": az, "alt": alt}
+                correction = {axis: correction[axis] + max(
+                    -cap - rates[axis] - correction[axis],
+                    min(cap - rates[axis] - correction[axis],
+                        hold_correction(tracking["hold"][axis] - offset[axis])))
+                    for axis in ("az", "alt")}
         mount.update_track({"az": apply_correction(az, correction["az"]),
                             "alt": apply_correction(alt, correction["alt"])})
+
+    def track_offset(mount, target):
+        """直結版で、今の軸の角度と、目標の計算上の軸の角度との差（度）。基準がなければ None。"""
+        if not direct:
+            return None
+        status_now = mount.status()
+        if not status_now["referenced"] or status_now["raw"] is None:
+            return None
+        current = effective_alignment(store.get())
+        if not current:
+            return None
+        az, alt = sky.altaz(target)
+        here = status_now["raw"]
+        model = alignment_model.axis_of(current, float(az), float(alt), here["az"])
+        return {"az": here["az"] - model["az"], "alt": here["alt"] - model["alt"]}
 
     def save_flip(mount):
         # 再起動や接続し直しのあとも、高度の読み取りの裏返りの状態を引き継げるようにする
@@ -411,6 +464,11 @@ def create_app(cfg):
             return SYNSCAN_ALIGNMENT
         return None
 
+    plate_cfg = cfg.get("plate_solve", {})
+    solver = plate_model.Solver(plate_cfg)
+    plate = {"run": None}
+    centering = {"run": None}  # 導入のあとにファインダーで解いて寄せる処理
+
     supervisor = MountSupervisor(cfg["mount"], on_mount_tick, on_mount_connect,
                                  enabled=store.get().get("mount_enabled", True),
                                  on_release=save_flip, flip_hint=lambda: store.get().get("mount_flip"),
@@ -457,6 +515,8 @@ def create_app(cfg):
             "pointing": alignment_model.pointing(effective_alignment(state), mount_status["raw"])
                         if effective_alignment(state) and mount_ok else None,
             "notice": notice["message"],
+            "plate_alignment": plate["run"].snapshot() if plate["run"] else None,
+            "centering": centering["run"].snapshot() if centering["run"] else None,
             "tracking": {"target": tracking["target"]["key"] if tracking["target"] else None,
                          "label": tracking["target"]["label"] if tracking["target"] else None,
                          "guide": guider.snapshot(),
@@ -501,7 +561,10 @@ def create_app(cfg):
         return snapshot()
 
     def stop_mount():
-        """全軸を止める。SynScan 本体の追尾も切る（`P` の停止では切れない）。"""
+        """全軸を止める。SynScan 本体の追尾も切る（`P` の停止では切れない）。アラインメントの途中なら中止する。"""
+        for job in (plate["run"], centering["run"]):
+            if job and job.running():
+                job.cancel()
         mount = supervisor.mount
         if mount is None:
             return JSONResponse({"error": "架台に接続していません"}, 503)
@@ -642,6 +705,171 @@ def create_app(cfg):
         store.update(alignment=None)
         apply_reference()
         return {"ok": True}
+
+    @app.get("/api/sky-mask")
+    def get_sky_mask():
+        return store.get()["sky_mask"] or plate_model.DEFAULT_SKY_MASK
+
+    @app.post("/api/sky-mask")
+    def set_sky_mask(body: dict = Body(...)):
+        try:
+            mask = plate_model.check_sky_mask(body)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, 400)
+        store.update(sky_mask=mask)
+        return mask
+
+    def wait_goto(mount, cancelled):
+        """先に始めた目標移動が終わるまで待つ。失敗したら MountError、中止なら Cancelled。"""
+        end = time.monotonic() + 300
+        while time.monotonic() < end:
+            status_now = mount.status()
+            if status_now["goto"] is None:
+                result = status_now["goto_result"] or {}
+                if not result.get("ok"):
+                    raise MountError(result.get("message") or status_now["fault"] or "導入が止まりました")
+                return
+            if cancelled.is_set():
+                mount.stop("中止")
+                raise plate_model.Cancelled()
+            time.sleep(0.2)
+        mount.stop("移動が終わらないため停止")
+        raise MountError("移動が時間内に終わりませんでした")
+
+    def finder_capture_hooks():
+        """ファインダーを撮って解く部分（アラインメントと導入後の寄せで共通）。"""
+        finder_point = store.get()["finder"]
+        crop = int(plate_cfg.get("crop_x", 160))
+        width, height = plate_cfg.get("finder_size", [1920, 1080])
+        point = (finder_point["x"] * width - crop, finder_point["y"] * height)
+        stack = int(plate_cfg.get("stack", 8))
+        return {
+            "capture": lambda path: (plate_model.grab_finder_stack(FINDER_RTSP, path, stack, crop, width, height) > 0
+                                     if stack > 1 else plate_model.grab_finder(FINDER_RTSP, path, crop)),
+            "point": point,
+            "altaz_of": lambda ra, dec, t: tuple(map(float, sky.altaz_of_radec(ra, dec, t))),
+            "radec_of": lambda az, alt: tuple(map(float, sky.radec_of(az, alt))),
+        }
+
+    def start_centering(mount, query, target):
+        """導入のあと、ファインダーで解いて寄せ、追尾を始める。"""
+        finder = finder_capture_hooks()
+        run_box = {}
+
+        def cancelled():
+            return run_box["run"].cancelled
+
+        def move(step):
+            clear_tracking()
+            mount.stop("寄せる前に停止")
+            mount.goto_axes(step, f"{target['label']}へ寄せる")
+            wait_goto(mount, cancelled())
+
+        def track():
+            result = start_tracking({"target": query})
+            if isinstance(result, JSONResponse):
+                raise MountError(json.loads(result.body).get("error", "追尾を始められません"))
+
+        def done(result):
+            print(f"centering {target['label']}: {result}", flush=True)
+
+        hooks = {
+            **finder,
+            "wait_goto": lambda: wait_goto(mount, cancelled()),
+            "track": track,
+            "move": move,
+            "raw": lambda: mount.status()["raw"],
+            "stop": lambda: stop_mount(),
+            "solve": lambda path, hint, radius: solver.solve(path, hint, radius, finder["point"], cancelled()),
+            "params": lambda: effective_alignment(store.get()) or {},
+            "target_altaz": lambda t: tuple(map(float, sky.altaz(target, sky.time_of(t)))),
+            "done": done,
+        }
+        workdir = resolve(plate_cfg.get("workdir", "var/plate")) / ("center-" + time.strftime("%Y%m%d-%H%M%S"))
+        run = plate_model.Centering(hooks, target["label"], tolerance=float(plate_cfg.get("center_tolerance", 0.03)),
+                                    rounds=int(plate_cfg.get("center_rounds", 3)), workdir=workdir)
+        run_box["run"] = run
+        centering["run"] = run
+        run.start()
+
+    def plate_hooks(mount):
+        finder = finder_capture_hooks()
+
+        def move(step):
+            mount.goto_axes(step, "アラインメントの点")
+            wait_goto(mount, plate["run"].cancelled)
+
+        def avoid(az, alt):
+            for body, sep in (("moon", PLATE_MOON_SEP), ("sun", 30.0)):
+                b_az, b_alt = sky.altaz(body)
+                if b_alt > -5 and alignment_model.separation(az, alt, float(b_az), float(b_alt)) < sep:
+                    return body
+            return None
+
+        def commit(params, points, errors):
+            now = time.time()
+            result = {**params, "star": "plate", "source": "plate", "time": now,
+                      "label": f"プレートソルブ（{len(points)} 点）",
+                      "clock_offset": mount.clock() - now,
+                      "errors": [float(e) for e in errors],
+                      "points": [{"raw": p["raw"], "sky": p["sky"]} for p in points]}
+            store.update(alignment=result)
+            apply_reference()
+            notice["message"] = ""
+            print(f"plate alignment: {params} errors={errors}", flush=True)
+
+        return {
+            **finder,
+            "raw": lambda: mount.status()["raw"],
+            "move": move,
+            "stop": lambda: mount.stop("アラインメントを中止"),
+            "solve": lambda path, hint, radius: solver.solve(path, hint, radius, finder["point"],
+                                                             plate["run"].cancelled if plate["run"] else None),
+            "avoid": avoid,
+            "commit": commit,
+        }
+
+    @app.post("/api/alignment/plate")
+    def start_plate_alignment(body: dict = Body(default={})):
+        """ファインダーのプレートソルブで、2〜3 点の自動アラインメントを始める（直結版のみ）。"""
+        mount = supervisor.mount
+        if not direct:
+            return JSONResponse({"error": "直結版だけで使えます"}, 409)
+        if mount is None:
+            return JSONResponse({"error": "架台に接続していません"}, 503)
+        if plate["run"] and plate["run"].running():
+            return JSONResponse({"error": "アラインメントの途中です"}, 409)
+        if not solver.available():
+            return JSONResponse({"error": "ASTAP（astap_cli）が見つかりません"}, 503)
+        status_now = mount.status()
+        if status_now["fault"]:
+            return JSONResponse({"error": f"見張りが止めた状態です（{status_now['fault']}）。停止ボタンで解除してください"}, 409)
+        if status_now["goto"]:
+            return JSONResponse({"error": "導入中です"}, 409)
+        if float(sky.altaz("sun")[1]) > PLATE_MAX_SUN_ALT:
+            return JSONResponse({"error": "太陽が沈んで空が暗くなってから使えます"}, 409)
+        clear_tracking()
+        try:
+            mount.stop("アラインメントのため停止")
+        except COMM_ERRORS as e:
+            return JSONResponse({"error": str(e)}, 503)
+        mask = store.get()["sky_mask"] or plate_model.DEFAULT_SKY_MASK
+        start = effective_alignment(store.get()) or {}
+        workdir = resolve(plate_cfg.get("workdir", "var/plate")) / time.strftime("%Y%m%d-%H%M%S")
+        run = plate_model.PlateAlignment(
+            plate_hooks(mount), start, mask,
+            tolerance=float(plate_cfg.get("tolerance", 0.1)), points=int(plate_cfg.get("points", 3)),
+            max_points=int(plate_cfg.get("max_points", 5)), max_attempts=int(plate_cfg.get("max_attempts", 8)),
+            workdir=workdir, az_span=mount.safety.az_span - 5.0,
+            alt_band=tuple(float(v) for v in plate_cfg.get("alt_band", [30.0, 50.0])))
+        plate["run"] = run
+        run.start()
+        print(f"plate alignment started, mask={mask}", flush=True)
+        return {"ok": True}
+
+    @app.delete("/api/alignment/plate")
+    def cancel_plate_alignment():
+        return stop_mount()
 
     @app.get("/api/reference")
     def get_reference():
@@ -793,8 +1021,9 @@ def create_app(cfg):
         if info["alt"] > DIRECT_GOTO_MAX_ALT:
             raise TargetError(f"目標の高度が {info['alt']:.1f}° で、{DIRECT_GOTO_MAX_ALT:.0f}° より高いので導入しません")
         here = status_now["raw"]
-        d_az = alignment_model.wrap180(info["az"] - current["az_offset"] - here["az"])
-        d_alt = info["alt"] - current["alt_offset"] - here["alt"]
+        model = alignment_model.axis_of(current, info["az"], info["alt"], here["az"])
+        d_az = model["az"] - here["az"]
+        d_alt = model["alt"] - here["alt"]
         if abs(d_az) > GOTO_MAX_DEG or abs(d_alt) > GOTO_MAX_DEG:
             raise TargetError(f"移動が大きすぎます（方位 {d_az:+.1f}°、高度 {d_alt:+.1f}°）。"
                               f"各軸 {GOTO_MAX_DEG:.0f}° 以内になるよう、途中の天体を経由してください")
@@ -849,9 +1078,15 @@ def create_app(cfg):
             print(f"goto requested by {request.client.host if request.client else '?'}: "
                   f"{describe_direct_plan(plan) if direct else describe_plan(plan)}", flush=True)
             clear_tracking()
+            if centering["run"] and centering["run"].running():
+                centering["run"].cancel()
             if direct:
                 mount.stop("導入の前に停止")
                 mount.goto_axes(plan["axis_target"], target["label"])
+                # 既定では、導入のあとファインダーで解いて寄せ、追尾を始める（暗いときだけ）
+                if (body.get("center", True) and solver.available()
+                        and float(sky.altaz("sun")[1]) <= PLATE_MAX_SUN_ALT):
+                    start_centering(mount, saved["query"], target)
             else:
                 ra, dec = sky.radec_j2000(target)
                 mount.start_goto(ra, dec, plan)
@@ -889,6 +1124,10 @@ def create_app(cfg):
                 return JSONResponse({"error": "太陽は追尾しません"}, 409)
             if sky.altaz(target)[1] < 0:
                 return JSONResponse({"error": "地平線の下にあります"}, 409)
+            hold = track_offset(mount, target)
+            if hold and max(abs(hold["az"]), abs(hold["alt"])) > TRACK_MAX_OFFSET:
+                return JSONResponse({"error": f"目標から方位 {hold['az']:+.1f}°、高度 {hold['alt']:+.1f}° 離れています。"
+                                              f"先に導入してから追尾してください"}, 409)
             az, alt = sky.rates(target)
             # SynScan 本体の追尾と重ならないよう、先に切る
             mount.set_tracking_mode("off")
@@ -899,6 +1138,8 @@ def create_app(cfg):
         except COMM_ERRORS as e:
             return JSONResponse({"error": str(e)}, 503)
         tracking["target"] = target
+        tracking["hold"] = hold
+        tracking["follow"] = {}
         if body.get("guide"):
             guider.start()
         else:

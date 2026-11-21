@@ -105,6 +105,12 @@ class SafetyTest(unittest.TestCase):
         m = Monitor(cfg)
         m.update({"az": 0, "alt": 0}, {"az": st, "alt": st}, {"az": 1.0}, 0.0)
         self.assertIn("飛んだ", m.update({"az": 3.0, "alt": 0}, {"az": st, "alt": st}, {"az": 1.0}, 0.2))
+        # 高速の目標移動は実測で約 10.6°/秒。0.21 秒で 2.23° 進んでも止めない（2026-11-21 の誤停止）
+        run = {"initialized": True, "running": True}
+        m = Monitor(cfg)
+        m.update({"az": 0, "alt": 0}, {"az": run, "alt": st}, {"az": cfg.jump_speed}, 0.0)
+        self.assertIsNone(m.update({"az": -2.23, "alt": 0}, {"az": run, "alt": st}, {"az": cfg.jump_speed}, 0.21))
+        self.assertIn("飛んだ", m.update({"az": -8.0, "alt": 0}, {"az": run, "alt": st}, {"az": cfg.jump_speed}, 0.42))
         m = Monitor(cfg)
         bad = {"initialized": False, "running": False}
         self.assertIn("未初期化", m.update({"az": 0, "alt": 0}, {"az": bad, "alt": st}, {}, 0.0))
@@ -262,6 +268,27 @@ class DirectMountTest(unittest.TestCase):
             m.track({"az": 3600.0})
         m.stop()
         self.assertFalse(any(a.running for a in self.fake.axes.values()))
+
+    def test_stick_during_tracking_resumes_on_release(self):
+        m = self.make(reference=power_on_reference())
+        m.track({"az": 15.0, "alt": 10.0})
+        m.drive(3, 0)
+        self.assertIn("az", m.status()["moving"])
+        self.assertIn("az", m.status()["tracking"])  # 追尾の速さは残っている
+        m.drive(0, 0)
+        self.assertEqual(m.status()["moving"], {})
+        self.assertEqual(m.status()["tracking"], {"az": 15.0, "alt": 10.0})
+        self.assertTrue(self.fake.axes["1"].running and self.fake.axes["1"].forward)
+        m.stop()
+
+    def test_stick_timeout_also_resumes_tracking(self):
+        m = self.make(reference=power_on_reference())
+        m.track({"az": 15.0, "alt": 10.0})
+        m.move("alt", -1, 3)
+        self.assertTrue(wait_for(lambda: m.status()["moving"] == {}, timeout=5))
+        self.assertTrue(self.fake.axes["2"].running and self.fake.axes["2"].forward)
+        self.assertIn("alt", m.status()["tracking"])
+        m.stop()
 
     def test_unplugged_usb_sets_error(self):
         m = self.make(reference=power_on_reference())

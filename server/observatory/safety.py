@@ -14,6 +14,7 @@
 import math
 from dataclasses import dataclass, field
 
+from . import alignment as alignment_model
 from .mount import MountError
 
 AXES = ("az", "alt")
@@ -36,7 +37,9 @@ class SafetyConfig:
     max_move_deg: float = 45.0
     max_move_seconds: float = 120.0
     jump_margin: float = 0.5  # 速さ × 時間に足す余裕（度）
-    jump_speed: float = 6.0  # 基板が動いている軸で許す速さ（度/秒）。高速の目標移動より速い
+    # 基板が動いている軸で許す速さ（度/秒）。高速の目標移動は 2026-11-21 の実測で両軸とも
+    # 10.5〜10.8°/秒（0.1 秒ほどで最高速に達する）。tools/measure_goto_speed.py で測った
+    jump_speed: float = 15.0
     idle_motion: float = 0.05  # 止めているときに許す動き（度）
     settle_seconds: float = 1.5  # 止めてから止まりきるまで見逃す時間（秒）
     stall_seconds: float = 2.0
@@ -58,12 +61,17 @@ class Reference:
     az_offset: float = 0.0
     alt_offset: float = 0.0
     label: str = ""
+    tilt_x: float = 0.0  # 架台の傾き（alignment.py のモデル、度）。プレートソルブで求めたときだけ 0 以外
+    tilt_y: float = 0.0
+
+    def params(self):
+        return {"az_offset": self.az_offset, "alt_offset": self.alt_offset, "tilt_x": self.tilt_x, "tilt_y": self.tilt_y}
 
     def pointing(self, axis_deg):
-        return {"az": axis_deg["az"] + self.az_offset, "alt": axis_deg["alt"] + self.alt_offset}
+        return alignment_model.sky_of(self.params(), axis_deg)
 
-    def to_axis(self, az, alt):
-        return {"az": az - self.az_offset, "alt": alt - self.alt_offset}
+    def to_axis(self, az, alt, near_az=0.0):
+        return alignment_model.axis_of(self.params(), az, alt, near_az)
 
 
 def power_on_reference():

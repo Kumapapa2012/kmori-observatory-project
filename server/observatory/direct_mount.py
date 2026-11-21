@@ -185,7 +185,8 @@ class DirectMount:
             taking_up = speed < TAKE_UP_RATE and self._remaining_gap(axis, direction) > 0.02
             actual = TAKE_UP_RATE if taking_up else speed
             same_mode = carry and (carry["actual"] > SLOW_LIMIT) == (actual > SLOW_LIMIT)
-            self.track_rates.pop(axis, None)
+            # 追尾の速さは残し、離したとき（_stop_axis）に追尾へ戻す。動かしている間は update_track も
+            # その軸を動かさない
         print(f"start {axis} dir={direction} rate={rate} speed={speed} actual={actual} at {self.positions[axis]:+.4f}", flush=True)
         if same_mode:
             self._change_speed(axis, actual, actual > SLOW_LIMIT)

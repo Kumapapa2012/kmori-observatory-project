@@ -10,7 +10,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
-from observatory.guiding import (HEIGHT, MIN_PEAK, REFRESH_RANGE, WIDTH, Controller, Guider, apply_correction,
+from observatory.guiding import (HEIGHT, MIN_PEAK, REFRESH_RANGE, WIDTH, Controller, Guider, apply_correction, hold_correction,
                                  field_rotation_rate, measure_shift, refresh_interval)
 
 
@@ -98,6 +98,12 @@ class CorrectionTest(unittest.TestCase):
     def test_does_not_reverse_direction(self):
         self.assertEqual(apply_correction(1.0, -3.0), 0.0)
         self.assertEqual(apply_correction(-1.0, 3.0), 0.0)
+
+    def test_hold_correction(self):
+        self.assertAlmostEqual(hold_correction(0.1), 18.0)
+        self.assertAlmostEqual(hold_correction(-0.1), -18.0)
+        self.assertEqual(hold_correction(1.0), 60.0)
+        self.assertEqual(hold_correction(0.001), 0.0)
 
 
 class RotationTest(unittest.TestCase):

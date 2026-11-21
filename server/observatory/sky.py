@@ -174,6 +174,22 @@ class Sky:
             alt, az, _ = apparent.altaz()
         return az.degrees, alt.degrees
 
+    def time_of(self, unix_time):
+        """UNIX 時刻（秒）を Skyfield の時刻にする。"""
+        from datetime import datetime, timezone
+        return self.timescale.from_datetime(datetime.fromtimestamp(unix_time, timezone.utc))
+
+    def altaz_of_radec(self, ra_hours, dec, unix_time=None):
+        """J2000 の赤経・赤緯（プレートソルブの結果）の、その時刻の方位と高度（大気差を含む）。"""
+        time = self.now() if unix_time is None else self.time_of(unix_time)
+        return self.altaz(Star(ra_hours=ra_hours, dec_degrees=dec), time)
+
+    def radec_of(self, az, alt, time=None):
+        """方位・高度の向きの J2000 の赤経（時）と赤緯（度）。プレートソルブのヒントに使う（大気差は無視）。"""
+        time = self.now() if time is None else time
+        ra, dec, _ = self.site.at(time).from_altaz(alt_degrees=alt, az_degrees=az).radec()
+        return ra.hours, dec.degrees
+
     def radec_j2000(self, name, time=None):
         """観測地から見た J2000（ICRS）の赤経（時）と赤緯（度）。SynScan の `r` に渡す値。
         月は視差があるので、地球の中心ではなく観測地から見た位置を使う。"""

@@ -57,6 +57,6 @@ paths:
       -i /dev/v4l/by-id/usb-H264_USB_Camera_H264_USB_Camera_2020032801-video-index0
       -map 0:v -vf scale_vaapi=format=nv12
       -c:v h264_vaapi -profile:v constrained_baseline -bf 0 -g 30
-      -rc_mode VBR -b:v 3M -maxrate 5M -async_depth 1
+      -rc_mode VBR -b:v 8M -maxrate 12M -async_depth 1
       -f rtsp -rtsp_transport tcp -pkt_size 1200 rtsp://127.0.0.1:8554/finder
     runOnInitRestart: yes

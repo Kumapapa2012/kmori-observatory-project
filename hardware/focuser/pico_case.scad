@@ -58,6 +58,7 @@ z_top = z_ceil + ceil_t;           // 全高
 R_out = 4;  R_in = 1.5;  R_top = 2;  R_bot = 1;
 
 rib_y = 5.4;  rib_w = 1.6;         // 板を下から支えるリブ
+arm_notch = [[4.5, 10.0], [22.5, 29.0], [42.0, 47.0]];   // リブの切り欠きの x の範囲 (板の USB 側の端から)。Pico H の腕 (写真から目測: 5.7〜8.9、23.6〜27.9、43.2〜45.9) に両側 約 1 の余裕。要実測
 pad_x = [18, 46];  pad_y = 5.4;  pad_s = 3;
 screw_x = [12, 47];                // 本体のねじ (2 組目はケーブル抑えの側へ寄せた。ユーザー 2026-11-24)
 screw_y = Wi / 2 + wall_s / 2;
@@ -146,9 +147,14 @@ module base() {
     for (s = [-1, 1])
         translate([wing_x0 + wscrew_x, s * wscrew_y, floor_t - 0.01]) cylinder(d = 5.0, h = gallery + 0.01);
     // Pico を下から支えるリブ
-    for (s = [-1, 1])
+    // 板の下のヘッダーの腕 (黒い樹脂の横桟、厚み hdr_h) を逃げる切り欠き付き (ユーザーが印刷後に手で切った。2026-11-25)
+    for (s = [-1, 1]) difference() {
         translate([x_board0 + 2, s * rib_y - rib_w / 2, floor_t - 0.01])
             cube([pico_L - 4, rib_w, z_pcb_bot - floor_t + 0.01]);
+        for (n = arm_notch)
+            translate([x_board0 + n[0], s * rib_y - rib_w, z_pcb_bot - hdr_h - 0.3])
+                cube([n[1] - n[0], 2 * rib_w, hdr_h + 0.4]);
+    }
     header_pocket();
 }
 // ヘッダーの凹み: 側壁 2 枚 + 櫛の歯 (ピンの溝つき)

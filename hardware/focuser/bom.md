@@ -39,6 +39,8 @@
 
 `focus_clip.scad`、`focus_hub.scad`、`focus_bracket.scad`、`focus_motor_pulley.scad` と `focus_clip_*.stl` は、以前の方式 (車輪、ベルト) のもので、使わない。
 
+ファームウェア: `firmware/` (`main.py` と確認用の `host.py`)。
+
 ## 配線
 
 | 信号 | Pico のピン | サーボの線 |

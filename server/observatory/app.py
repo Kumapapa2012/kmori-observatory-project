@@ -19,6 +19,7 @@ from . import alignment as alignment_model
 from .camera import Camera
 from .capture import Capture, CaptureError
 from .config import ROOT, resolve
+from .focuser import Focuser, FocuserError
 from .guiding import FrameReader, Guider, apply_correction, field_rotation_rate, hold_correction
 from .direct_mount import DirectMount
 from .mount import Mount, MountError
@@ -494,6 +495,7 @@ def create_app(cfg):
     capture = Capture(cfg["capture"], cfg["camera"]["device"], store, camera, mount_raw,
                       resolve(cfg["capture"]["root"]), resolve(cfg["capture"]["preview_dir"]))
     clients = set()
+    focuser = Focuser(cfg.get("focuser", {}))
 
     def snapshot():
         mount = supervisor.mount
@@ -528,6 +530,7 @@ def create_app(cfg):
             "camera": controls,
             "finder_camera": finder_camera.controls(),
             "mount": mount_status,
+            "focuser": focuser.status(),
             "webrtc_port": cfg["server"]["webrtc_port"],
         }
 
@@ -551,6 +554,7 @@ def create_app(cfg):
         task.cancel()
         await asyncio.to_thread(capture.close)
         await asyncio.to_thread(guider.stop)
+        await asyncio.to_thread(focuser.close)
         # サーバーの終了時は架台を止めてから終わる
         await asyncio.to_thread(supervisor.close)
 
@@ -565,6 +569,12 @@ def create_app(cfg):
         for job in (plate["run"], centering["run"]):
             if job and job.running():
                 job.cancel()
+        # フォーカスは架台の接続と関係なく止める。セットされていなければ何もしない
+        if focuser.connected():
+            try:
+                focuser.stop()
+            except FocuserError as e:
+                print(f"focuser stop failed: {e}", flush=True)
         mount = supervisor.mount
         if mount is None:
             return JSONResponse({"error": "架台に接続していません"}, 503)
@@ -605,6 +615,23 @@ def create_app(cfg):
     def stop_from_page():
         stop_mount()
         return RedirectResponse("/stop", 303)
+
+    def focus_call(call, *args):
+        try:
+            call(*args)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, 400)
+        except FocuserError as e:
+            return JSONResponse({"error": str(e)}, 503)
+        return {"ok": True}
+
+    @app.post("/api/focus")
+    def move_focus(body: dict = Body(...)):
+        return focus_call(focuser.move, body.get("direction"), body.get("speed"))
+
+    @app.post("/api/focus/stop")
+    def stop_focus():
+        return focus_call(focuser.stop)
 
     @app.post("/api/camera")
     def set_camera(request: Request, body: dict = Body(...)):

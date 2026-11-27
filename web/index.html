@@ -3,7 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <title>Observatory</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 </head><body>
 <div id="app">
   <!-- 表示は main（主鏡が大きくファインダーがワイプ）、finder（その逆）、split（横並び） -->
@@ -52,6 +52,14 @@
     <label>露出 <input type="range" id="exposure" min="0" max="4" step="0.01"> <span id="exposure-value"></span></label>
     <label>ゲイン <input type="range" id="gain" min="0" max="128" step="1"> <span id="gain-value"></span></label>
     <button id="close-camera">閉じる</button>
+  </div>
+
+  <div id="focus" class="panel dialog" hidden>
+    <div id="focus-state" class="note"></div>
+    <div class="row" id="focus-speeds">
+      <button data-speed="fine">微動</button><button data-speed="mid">中</button><button data-speed="fast">速</button><button id="close-focus">閉じる</button>
+    </div>
+    <div class="row"><button class="focus-move" data-direction="-1">− 逆転</button><button class="focus-move" data-direction="1">＋ 正転</button></div>
   </div>
 
   <div id="align" class="panel dialog" hidden>
@@ -144,8 +152,9 @@
   <div id="stick" class="panel"><span class="stick-label">パン / ティルト</span><div id="knob"></div></div>
   <div id="notice"></div>
   <button id="mount-link" class="on">架台 接続中</button>
+  <button id="open-focus">フォーカス</button>
   <button id="stop">停止</button>
 </div>
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="app.js?v=16"></script>
+<script src="app.js?v=17"></script>
 </body></html>

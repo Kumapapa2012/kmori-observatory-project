@@ -178,3 +178,16 @@ button {
 .sky-mask-side input { width: 4em; }
 #plate-points td.solved { color: #7fd17f; }
 #plate-points td.failed { color: #e08a8a; }
+
+/* 映像を見ながら回すので、中央を隠さないよう下に置く */
+#focus { top: auto; bottom: 34px; transform: translateX(-50%); width: 260px; gap: 5px; padding: 6px 10px; }
+#close-focus { margin-left: auto; }
+/* 右上のメニューは幅に余裕がないので、停止ボタンの左に置く */
+#open-focus {
+  position: absolute; right: calc(max(16px, env(safe-area-inset-right)) + 106px); bottom: 14px; z-index: 4;
+  height: 40px; border-radius: 10px; background: #000a; color: #f5eedd; border: 1px solid #f5eedd66;
+}
+#focus .row { display: flex; gap: 6px; width: 100%; }
+#focus-speeds button.on { background: var(--frame-line); color: #fff; }
+.focus-move { flex: 1; min-height: 44px; touch-action: none; }
+.focus-move.on { background: var(--frame-line); color: #fff; }

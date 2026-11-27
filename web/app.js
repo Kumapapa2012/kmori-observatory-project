@@ -69,6 +69,7 @@ function centeringNotice(latest) {
 }
 function render() {
   renderPlate();
+  renderFocus();
   let system;
   if (!wsOpen) system = ["サーバー 切断", "bad"];
   else if (!latest) system = ["確認中", "idle"];
@@ -399,6 +400,72 @@ $("mount-link").addEventListener("click", async () => {
     $("notice").textContent = "接続の切り替えを送れませんでした";
   }
 });
+
+// フォーカス。ボタンを押している間だけ、短い指令を繰り返す。指令が止まれば回転も止まる
+const FOCUS_MAX_HOLD = 10000;  // 押し続けても止める時間。端に当てたまま回し続けないため
+let focusSpeed = ["fine", "mid", "fast"].includes(saved("focusSpeed")) ? saved("focusSpeed") : "fine";
+let focusHold = null, focusPending = false, focusError = "";
+function focusReady() { return Boolean(wsOpen && latest && latest.focuser && latest.focuser.connected); }
+function renderFocus() {
+  const ready = focusReady();
+  if (!ready) releaseFocus();
+  $("focus-state").textContent = !wsOpen || !latest ? "サーバーに接続していません"
+    : !ready ? "フォーカスドライバをセットしてください" : focusError || "押している間、回ります";
+  for (const button of document.querySelectorAll(".focus-move")) button.disabled = !ready;
+  for (const button of document.querySelectorAll("#focus-speeds button")) {
+    button.classList.toggle("on", button.dataset.speed === focusSpeed);
+  }
+}
+async function sendFocus(direction, speed) {
+  if (focusPending) return;  // 通信が遅いときに指令をためない
+  focusPending = true;
+  try {
+    const body = await (await postJson("/api/focus", {direction, speed})).json();
+    focusError = body.error || "";
+  } catch (e) { focusError = "フォーカスの指令を送れません"; }
+  focusPending = false;
+  if (focusError) releaseFocus();
+  renderFocus();
+}
+function releaseFocus() {
+  if (!focusHold) return;
+  const {timer, button, speed} = focusHold;
+  focusHold = null;
+  clearInterval(timer);
+  button.classList.remove("on");
+  // 微動と中は 1 刻みを回しきる。速は指令の残りを打ち切る
+  if (speed === "fast") fetch("/api/focus/stop", {method: "POST"}).catch(() => {});
+}
+for (const button of document.querySelectorAll(".focus-move")) {
+  button.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    if (!focusReady()) return;
+    releaseFocus();
+    button.setPointerCapture(e.pointerId);
+    button.classList.add("on");
+    const direction = +button.dataset.direction, speed = focusSpeed, started = Date.now();
+    focusError = "";
+    sendFocus(direction, speed);
+    const timer = setInterval(() => {
+      if ($("focus").hidden || Date.now() - started > FOCUS_MAX_HOLD) releaseFocus();
+      else sendFocus(direction, speed);
+    }, latest.focuser.speeds[speed]);
+    focusHold = {timer, button, speed};
+  });
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) button.addEventListener(type, releaseFocus);
+  button.addEventListener("contextmenu", e => e.preventDefault());
+}
+for (const button of document.querySelectorAll("#focus-speeds button")) {
+  button.addEventListener("click", () => {
+    focusSpeed = button.dataset.speed;
+    save("focusSpeed", focusSpeed);
+    renderFocus();
+  });
+}
+window.addEventListener("blur", releaseFocus);
+document.addEventListener("visibilitychange", releaseFocus);
+$("open-focus").addEventListener("click", () => { focusError = ""; $("focus").hidden = false; renderFocus(); activate($("focus")); });
+$("close-focus").addEventListener("click", () => { releaseFocus(); activate(null); });
 
 // カメラのダイアログ
 const formatExposure = v => v >= 10000 ? (v / 10000).toFixed(1) + " 秒" : (v / 10).toFixed(1) + " ms";

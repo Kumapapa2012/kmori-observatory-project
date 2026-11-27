@@ -41,6 +41,10 @@ settle_seconds = 1.0
 still_timeout = 15
 stop_timeout = 10
 
+# フォーカスドライバー（Pico）。USB がつながっていなければ「セットされていない」とみなす
+[focuser]
+port_glob = "/dev/serial/by-id/*MicroPython*"
+
 [mount]
 # 架台の接続方式。"synscan" はハンドコントローラー（SynScan）経由のコントローラー版、
 # "direct" は SynHub の USB でモーター基板に直結する直結版（2026-11-14 決定）

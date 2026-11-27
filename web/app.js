@@ -46,8 +46,17 @@ function recordingLabel(r) {
   return r.kind === "timelapse" ? [base[0], `撮影中 ${r.count || 0} 枚`, base[2]] : base;
 }
 
+// 正常なときはアイコンだけにして、異常や撮影中だけ文字を添える
 function stateHtml(icon, label, tone) {
-  return `<div class="state" style="color:var(--${tone})"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>${label}</div>`;
+  const quiet = tone === "ok" || label === "録画なし";
+  return `<div class="state" style="color:var(--${tone})" title="${label}"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>` +
+    (quiet ? `<span class="sr">${label}</span>` : label) + "</div>";
+}
+
+// 通知。次の状態の受信で上書きされる
+function showNotice(text, action = false) {
+  $("notice-text").textContent = text;
+  $("notice-action").hidden = !action;
 }
 
 function trackingNotice(t) {
@@ -70,6 +79,7 @@ function centeringNotice(latest) {
 function render() {
   renderPlate();
   renderFocus();
+  renderReference();
   let system;
   if (!wsOpen) system = ["サーバー 切断", "bad"];
   else if (!latest) system = ["確認中", "idle"];
@@ -84,18 +94,27 @@ function render() {
   const aligned = live && latest.alignment;
   const rec = recordingLabel(live ? latest.recording : {kind: "none"});
   const power = POWER[live ? latest.power : "ok"] || POWER.ok;
-  $("status").innerHTML =
-    stateHtml(ICONS.plug, system[0], system[1]) +
-    (live ? stateHtml(ICONS.target, alignLabel(latest, aligned), aligned ? "ok" : "warn")
-          : stateHtml(ICONS.target, "不明", "idle")) +
-    (live ? stateHtml(ICONS[rec[0]], rec[1], rec[2]) : stateHtml(ICONS.idle, "不明", "idle")) +
-    (live ? stateHtml(ICONS.battery(power[0]), power[1], power[2]) : stateHtml(ICONS.battery(0), "不明", "idle"));
+  const states = [
+    ["接続", ICONS.plug, system[0], system[1]],
+    live ? ["基準", ICONS.target, alignLabel(latest, aligned), aligned ? "ok" : "warn"] : ["基準", ICONS.target, "不明", "idle"],
+    live ? ["録画", ICONS[rec[0]], rec[1], rec[2]] : ["録画", ICONS.idle, "不明", "idle"],
+    live ? ["電源", ICONS.battery(power[0]), power[1], power[2]] : ["電源", ICONS.battery(0), "不明", "idle"],
+  ];
+  $("status-icons").innerHTML = states.map(s => stateHtml(s[1], s[2], s[3])).join("");
 
   const p = live && latest.pointing;
   const raw = live && !p && latest.mount && latest.mount.backend === "direct" && latest.mount.raw;
+  const signedDeg = v => `${v >= 0 ? "+" : ""}${v.toFixed(1)}°`;
   $("pointing").textContent = raw
-    ? `電源投入時から 方位 ${raw.az >= 0 ? "+" : ""}${raw.az.toFixed(1)}°　高度 ${raw.alt >= 0 ? "+" : ""}${raw.alt.toFixed(1)}°`
-    : `方角 ${p ? p.az.toFixed(1) + "°" : "—"}　仰角 ${p ? p.alt.toFixed(1) + "°" : "—"}`;
+    ? `方位 ${signedDeg(raw.az)} 高度 ${signedDeg(raw.alt)} 仮`
+    : `方位 ${p ? p.az.toFixed(1) + "°" : "—"} 高度 ${p ? p.alt.toFixed(1) + "°" : "—"}`;
+  $("pointing").classList.toggle("provisional", Boolean(raw));
+
+  const list = $("status-list");
+  const detail = states.map(s => [s[0], s[2]]).concat([["向き", raw
+    ? `電源投入時から 方位 ${signedDeg(raw.az)}、高度 ${signedDeg(raw.alt)}（基準がないので仮の値）`
+    : $("pointing").textContent]]);
+  list.innerHTML = detail.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
 
   const link = live ? latest.mount_connection : null;
   const linkButton = $("mount-link");
@@ -119,7 +138,7 @@ function render() {
     notice = mount.restricted ? "制限モード: 向きの基準を選ぶまで、狭い範囲を低速でだけ動かせます"
                               : "向きの基準なし: 太陽を避ける判定と自動導入は使えません。太陽に向けないでください";
   else if (live) notice = "太陽に向けないでください";
-  $("notice").textContent = notice;
+  showNotice(notice, Boolean(mount && mount.backend === "direct" && !mount.referenced && !mount.error));
 
   // 保存の応答を待つ間は、古い位置に戻さない
   if (live && latest.finder && !finderPointPending &&
@@ -131,23 +150,51 @@ function render() {
   if (live) showCapture(latest.recording);
 }
 
-// パネルは触れると不透明になる。操作できるのは一度に 1 つだけ
+// パネルは触れると不透明になる。右側のパネルは同時に 1 つで、× を押すまで閉じない
 let active = null, activeTimer = 0;
 function activate(panel) {
-  if (active && active !== panel) {
-    active.classList.remove("active");
-    if (active.classList.contains("dialog")) active.hidden = true;
-  }
+  if (active && active !== panel) active.classList.remove("active");
   active = panel;
   clearTimeout(activeTimer);
   if (!panel) return;
   panel.classList.add("active");
-  if (!panel.classList.contains("dialog")) activeTimer = setTimeout(() => activate(null), 5000);
+  if (!panel.matches(".sheet, .modal")) activeTimer = setTimeout(() => activate(null), 5000);
 }
 for (const panel of document.querySelectorAll(".panel")) {
   panel.addEventListener("pointerdown", () => activate(panel));
 }
 $("views").addEventListener("pointerdown", () => activate(null));
+
+let openedSheet = null;
+const closeHooks = {};  // パネルを閉じるときの後始末
+function closeSheet() {
+  if (!openedSheet) return;
+  const id = openedSheet;
+  openedSheet = null;
+  $(id).hidden = true;
+  $("app").classList.remove("with-sheet");
+  if (closeHooks[id]) closeHooks[id]();
+  activate(null);
+}
+function openSheet(id) {
+  if (openedSheet !== id) closeSheet();
+  openedSheet = id;
+  $(id).hidden = false;
+  // 映像はパネルの左に寄せて、中央を隠さない
+  $("app").classList.add("with-sheet");
+  activate($(id));
+}
+
+// タブ。data-tabs の中のボタンで、同じ名前の data-page を切り替える
+const tabs = {};
+function selectTab(group, name) {
+  tabs[group] = name;
+  for (const b of document.querySelectorAll(`[data-tabs="${group}"] button`)) b.classList.toggle("on", b.dataset.tab === name);
+  for (const page of document.querySelectorAll(`[data-page^="${group}:"]`)) page.hidden = page.dataset.page !== `${group}:${name}`;
+}
+for (const bar of document.querySelectorAll("[data-tabs]")) {
+  for (const b of bar.children) b.addEventListener("click", () => selectTab(bar.dataset.tabs, b.dataset.tab));
+}
 
 // 状態の WebSocket。切れたら接続し直し、最初の受信で現在の状態を受け取る
 let ws = null;
@@ -162,7 +209,7 @@ function connectStatus() {
       startVideo(message.webrtc_port, message.recording.stream_epoch);
       render();
     } else if (message.type === "error") {
-      $("notice").textContent = message.message;
+      showNotice(message.message);
     }
   };
   ws.onclose = () => {
@@ -244,7 +291,6 @@ for (const s of Object.values(streams)) {
 
 // 表示の切り替え。ワイプに触ると大小を入れ替える
 const VIEW_ORDER = ["main", "split", "finder"];
-const VIEW_LABEL = {main: "表示: 主鏡", split: "表示: 横並び", finder: "表示: ファインダー"};
 const ZOOMS = [1, 2, 4, 8];
 const saved = key => { try { return localStorage.getItem(key); } catch (e) { return null; } };
 const save = (key, value) => { try { localStorage.setItem(key, value); } catch (e) { /* 保存できなくても表示は続ける */ } };
@@ -256,9 +302,7 @@ function setView(mode) {
   viewMode = mode;
   save("view", mode);
   $("views").dataset.view = mode;
-  $("view-mode").textContent = VIEW_LABEL[mode];
-  // ファインダーの道具は、ファインダーが大きく見えているときだけ出す
-  $("finder-tools").hidden = mode === "main";
+  for (const b of document.querySelectorAll("#view-modes button")) b.classList.toggle("on", b.dataset.view === mode);
   if (mode === "main") setPlacing(false);
 }
 function showFinderPoint() {
@@ -291,8 +335,8 @@ async function saveFinderPoint(point) {
   showFinderPoint();
   try {
     const body = await (await postJson("/api/finder", point)).json();
-    if (body.error) $("notice").textContent = body.error;
-  } catch (e) { $("notice").textContent = "照準の位置を保存できません"; }
+    if (body.error) showNotice(body.error);
+  } catch (e) { showNotice("照準の位置を保存できません"); }
   finderPointPending = false;
 }
 for (const [view, mode] of [[$("view-main"), "main"], [$("view-finder"), "finder"]]) {
@@ -308,13 +352,24 @@ for (const [view, mode] of [[$("view-main"), "main"], [$("view-finder"), "finder
                      y: clamp(finderPoint.y + (f.y - finderPoint.y) / finderZoom)});
   });
 }
-$("view-mode").addEventListener("click", () => setView(VIEW_ORDER[(VIEW_ORDER.indexOf(viewMode) + 1) % VIEW_ORDER.length]));
+for (const b of document.querySelectorAll("#view-modes button")) b.addEventListener("click", () => setView(b.dataset.view));
+function setLongLines(on) {
+  $("long-lines").checked = on;
+  $("app").classList.toggle("long-lines", on);
+  save("longLines", on ? "1" : "0");
+}
+$("long-lines").addEventListener("change", e => setLongLines(e.target.checked));
+setLongLines(saved("longLines") === "1");
 $("finder-zoom-button").addEventListener("click", () => {
   finderZoom = ZOOMS[(ZOOMS.indexOf(finderZoom) + 1) % ZOOMS.length];
   save("finderZoom", finderZoom);
   showFinderPoint();
 });
-$("finder-place").addEventListener("click", () => setPlacing(!placing));
+$("finder-place").addEventListener("click", () => {
+  // 照準は大きく出したファインダーの上で置く
+  if (!placing && viewMode === "main") setView("finder");
+  setPlacing(!placing);
+});
 $("finder-reset").addEventListener("click", () => saveFinderPoint({x: 0.5, y: 0.5}));
 setView(viewMode);
 showFinderPoint();
@@ -379,8 +434,8 @@ $("stop").addEventListener("pointerdown", e => {
   releaseStick();
   fetch("/api/mount/stop", {method: "POST"}).then(async r => {
     const body = await r.json();
-    if (body.error) $("notice").textContent = body.error;
-  }).catch(() => { $("notice").textContent = "停止を送れません。架台の電源を切ってください"; });
+    if (body.error) showNotice(body.error);
+  }).catch(() => { showNotice("停止を送れません。架台の電源を切ってください"); });
 });
 
 // 架台との接続の切り替え。切ると架台を止めてシリアルを手放す（映像はそのまま）
@@ -395,9 +450,9 @@ $("mount-link").addEventListener("click", async () => {
     const r = await fetch("/api/mount/connection", {method: "POST", headers: {"Content-Type": "application/json"},
                                                     body: JSON.stringify({connected: connect})});
     const body = await r.json();
-    if (body.error) $("notice").textContent = body.error;
+    if (body.error) showNotice(body.error);
   } catch {
-    $("notice").textContent = "接続の切り替えを送れませんでした";
+    showNotice("接続の切り替えを送れませんでした");
   }
 });
 
@@ -464,8 +519,25 @@ for (const button of document.querySelectorAll("#focus-speeds button")) {
 }
 window.addEventListener("blur", releaseFocus);
 document.addEventListener("visibilitychange", releaseFocus);
-$("open-focus").addEventListener("click", () => { focusError = ""; $("focus").hidden = false; renderFocus(); activate($("focus")); });
-$("close-focus").addEventListener("click", () => { releaseFocus(); activate(null); });
+
+// 左下の操作ドロアー。stick、focus、none のどれか。切り替えるときは操作中の指令を止める
+const DRAWERS = ["stick", "focus", "none"];
+let drawer = DRAWERS.includes(saved("drawer")) ? saved("drawer") : "stick";
+function setDrawer(name) {
+  releaseStick();
+  releaseFocus();
+  drawer = name;
+  save("drawer", name);
+  focusError = "";
+  $("stick").hidden = name !== "stick";
+  $("focus").hidden = name !== "focus";
+  for (const b of document.querySelectorAll("#drawer-tabs button")) b.classList.toggle("on", b.dataset.drawer === name);
+  renderFocus();
+}
+for (const b of document.querySelectorAll("#drawer-tabs button")) {
+  b.addEventListener("click", () => setDrawer(drawer === b.dataset.drawer ? "none" : b.dataset.drawer));
+}
+setDrawer(drawer);
 
 // カメラのダイアログ
 const formatExposure = v => v >= 10000 ? (v / 10000).toFixed(1) + " 秒" : (v / 10).toFixed(1) + " ms";
@@ -513,18 +585,17 @@ function showCamera(c) {
 async function setCamera(values) {
   const r = await fetch(CAMERA_API[cameraTarget], {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(values)});
   const body = await r.json();
-  if (body.error) $("notice").textContent = body.error;
+  if (body.error) showNotice(body.error);
 }
 function openCamera(target) {
   setCameraTarget(target);
-  $("camera").hidden = false;
-  activate($("camera"));
+  openSheet("camera");
 }
 // ファインダーを大きく出しているときは、ファインダーの設定から開く
 $("open-camera").addEventListener("click", () => openCamera(viewMode === "finder" ? "finder" : "camera"));
 $("finder-camera").addEventListener("click", () => openCamera("finder"));
 for (const b of document.querySelectorAll("[data-camera]")) b.addEventListener("click", () => setCameraTarget(b.dataset.camera));
-$("close-camera").addEventListener("click", () => activate(null));
+$("close-camera").addEventListener("click", closeSheet);
 $("manual").addEventListener("change", e => setCamera({manual: e.target.checked}));
 $("exposure").addEventListener("input", e => { if (sliderEditing.has("exposure")) $("exposure-value").textContent = formatExposure(toExposure(+e.target.value)); });
 $("exposure").addEventListener("change", e => {
@@ -539,10 +610,58 @@ $("gain").addEventListener("change", e => {
   e.target.blur();
 });
 
+$("status").addEventListener("click", () => openSheet("status-detail"));
+$("status").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") openSheet("status-detail"); });
+$("close-status").addEventListener("click", closeSheet);
+
+// 直結版の向きの基準。選択肢はホストから受け取る
+let referenceInfo = null;
+async function loadReference() {
+  try {
+    referenceInfo = await (await fetch("/api/reference")).json();
+  } catch (e) {
+    $("reference-message").textContent = "サーバーに接続できません";
+    return;
+  }
+  $("reference").hidden = referenceInfo.backend !== "direct";
+  const box = $("reference-options");
+  box.textContent = "";
+  for (const option of referenceInfo.options || []) {
+    const b = document.createElement("button");
+    b.textContent = option.kind === "power_on" ? option.label : `${option.label}を基準にする`;
+    b.addEventListener("click", () => chooseReference(option));
+    box.append(b);
+  }
+  renderReference();
+}
+function renderReference() {
+  if ($("setup").hidden) return;
+  const m = wsOpen && latest && latest.mount;
+  const current = m && m.reference;
+  $("reference-state").textContent = !m ? "架台に接続していません"
+    : m.referenced ? `今の基準: ${(current && current.label) || "登録済み"}`
+    : m.restricted ? "基準なし（制限モード）" : "基準なし";
+  for (const b of $("reference-options").children) b.disabled = !m;
+}
+async function chooseReference(option) {
+  releaseStick();
+  const message = option.kind === "power_on"
+    ? "架台の電源を入れたとき、鏡筒は北向きで水平でしたか？ ずれていると、太陽を避ける判定と自動導入が正しく働きません。"
+    : `${option.label}が主鏡の映像の中心に入っていますか？ ずれたまま登録すると、太陽を避ける判定と自動導入が正しく働きません。`;
+  const replace = latest && latest.mount && latest.mount.referenced ? "今の基準は置き換わります。\n" : "";
+  if (!confirm(replace + message)) return;
+  $("reference-message").textContent = "登録しています…";
+  try {
+    const body = await (await postJson("/api/reference", {kind: option.kind, key: option.key})).json();
+    $("reference-message").textContent = body.error || "向きの基準を登録しました";
+  } catch (e) { $("reference-message").textContent = "サーバーに接続できません"; }
+  refreshAlign();
+}
+
 // アラインメントのダイアログ。計算した位置と、現在の向きとの差を表示する
 const signed = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2) + "°";
 async function refreshAlign() {
-  if ($("align").hidden) return;
+  if ($("setup").hidden) return;
   try {
     const r = await (await fetch("/api/alignment")).json();
     const a = r.alignment;
@@ -559,8 +678,23 @@ async function refreshAlign() {
   } catch (e) { $("align-state").textContent = "サーバーに接続できません"; }
 }
 setInterval(refreshAlign, 2000);
-$("open-align").addEventListener("click", () => { $("align").hidden = false; activate($("align")); refreshAlign(); loadSite(); loadSkyMask(); });
-$("close-align").addEventListener("click", () => { stopMeasure(); activate(null); });
+// 未保存の観測地と空の範囲は、閉じて開き直しても残す
+let siteDirty = false;
+function openSetup(tab) {
+  openSheet("setup");
+  selectTab("setup", tab || tabs.setup || "point");
+  refreshAlign();
+  loadReference();
+  if (!siteDirty) loadSite();
+  if ($("sky-state").textContent !== "未保存") loadSkyMask();
+  else drawSkyMask();
+}
+$("open-setup").addEventListener("click", () => openSetup());
+$("notice-action").addEventListener("click", () => openSetup("point"));
+$("close-setup").addEventListener("click", closeSheet);
+closeHooks.setup = () => { stopMeasure(); setPlacing(false); $("site-map").hidden = true; };
+for (const b of document.querySelectorAll('[data-tabs="setup"] button')) b.addEventListener("click", () => setPlacing(false));
+for (const input of document.querySelectorAll('[data-page="setup:site"] input')) input.addEventListener("input", () => { siteDirty = true; });
 
 // 観測地。入力欄は開いたときと保存したときだけ埋め、入力中の値を定期更新で消さない
 const SITE_SOURCE = {config: "設定ファイル", phone: "端末の位置", map: "地図", manual: "手入力"};
@@ -583,6 +717,7 @@ async function loadSite() {
   try {
     const site = await (await fetch("/api/site")).json();
     fillSite(site);
+    siteDirty = false;
     siteMeasured = siteAdopted = null;
     savedSite = site;
     $("site-state").textContent = site.time
@@ -625,6 +760,7 @@ $("site-measure").addEventListener("click", () => {
     samples.push({latitude: c.latitude, longitude: c.longitude, accuracy: c.accuracy,
                   altitude: c.altitude, altitudeAccuracy: c.altitudeAccuracy});
     siteMeasured = summarize(samples);
+    siteDirty = true;
     $("site-lat").value = siteMeasured.latitude.toFixed(6);
     $("site-lon").value = siteMeasured.longitude.toFixed(6);
     const left = Math.max(0, MEASURE_SECONDS - Math.round((Date.now() - started) / 1000));
@@ -763,7 +899,10 @@ async function saveSkyMask() {
 }
 $("sky-save").addEventListener("click", saveSkyMask);
 $("plate-start").addEventListener("click", async () => {
-  if ($("sky-state").textContent === "未保存" && !(await saveSkyMask())) return;
+  if ($("sky-state").textContent === "未保存" && !(await saveSkyMask())) {
+    $("plate-state").textContent = "空の範囲を保存できません。空の範囲タブを確かめてください";
+    return;
+  }
   try {
     const r = await (await postJson("/api/alignment/plate", {})).json();
     $("plate-state").textContent = r.error || "開始しました";
@@ -772,7 +911,7 @@ $("plate-start").addEventListener("click", async () => {
 $("plate-cancel").addEventListener("click", async () => { await fetch("/api/alignment/plate", {method: "DELETE"}); });
 const PLATE_POINT = {moving: "移動中", solving: "解析中", solved: "解けた", failed: "解けず"};
 function renderPlate() {
-  if ($("align").hidden) return;
+  if ($("setup").hidden) return;
   const pa = latest && latest.plate_alignment;
   const running = pa && pa.state === "running";
   $("plate-start").disabled = !!running;
@@ -848,7 +987,7 @@ function showCaptureMessage(text) {
 // タイムラプスと動画は露出を固定して撮るので、自動露出のままなら何もしない
 function shootManual(path, values) {
   if (latest && latest.camera && !latest.camera.manual) {
-    showCaptureMessage("露出が自動です。「カメラ設定」から手動にして露出を合わせてください");
+    showCaptureMessage("露出が自動です。「露出」から手動にして露出を合わせてください");
     return;
   }
   shoot(path, values);
@@ -903,11 +1042,12 @@ async function loadQuickTargets() {
   } catch (e) { /* 開き直したときに読み直す */ }
 }
 $("open-track").addEventListener("click", () => {
-  $("track").hidden = false; activate($("track"));
+  openSheet("track");
   if (!$("track-quick").children.length) loadQuickTargets();
   refreshTrackInfo();
 });
-$("close-track").addEventListener("click", () => { hidePlan(); activate(null); });
+$("close-track").addEventListener("click", closeSheet);
+closeHooks.track = hidePlan;
 $("track-lookup").addEventListener("click", () => { if ($("track-query").value.trim()) selectTrack($("track-query").value.trim()); });
 $("track-query").addEventListener("keydown", e => { if (e.key === "Enter") $("track-lookup").click(); });
 $("goto-plan").addEventListener("click", async () => {
@@ -931,26 +1071,28 @@ $("goto-run").addEventListener("click", async () => {
   try {
     const r = await (await postJson("/api/goto", {plan_id: id})).json();
     if (r.error) showPlanError(r.error);
-    else activate(null);
+    else closeSheet();
   } catch (e) { showPlanError("サーバーに接続できません"); }
 });
 $("track-start").addEventListener("click", async () => {
   if (!trackTarget) return;
   const body = await (await postJson("/api/tracking", {target: trackTarget, guide: $("track-guide").checked})).json();
   if (body.error) showPlanError(body.error);
-  else activate(null);
+  else closeSheet();
 });
 $("track-synscan").addEventListener("click", async () => {
   const body = await (await postJson("/api/tracking", {mode: "synscan", target: trackTarget})).json();
   if (body.error) showPlanError(body.error);
-  else activate(null);
+  else closeSheet();
 });
 $("stop-track").addEventListener("click", async () => {
   await fetch("/api/tracking", {method: "DELETE"});
-  activate(null);
+  closeSheet();
 });
-$("open-capture").addEventListener("click", () => { $("capture").hidden = false; activate($("capture")); refreshCaptures(); });
-$("close-capture").addEventListener("click", () => activate(null));
+$("open-capture").addEventListener("click", () => { openSheet("capture"); refreshCaptures(); });
+$("close-capture").addEventListener("click", closeSheet);
+selectTab("capture", "still");
+selectTab("setup", "point");
 $("shoot-still").addEventListener("click", () => shoot("/api/capture/still", {}));
 $("shoot-timelapse").addEventListener("click", () => shootManual("/api/capture/timelapse", {interval: +$("timelapse-interval").value}));
 $("shoot-video").addEventListener("click", () => shootManual("/api/capture/video", {seconds: +$("video-seconds").value}));
@@ -1003,8 +1145,8 @@ function setMapLayer(name) {
   $("map-layer").textContent = name === "photo" ? "標準地図にする" : "写真にする";
 }
 function closeMap() {
-  $("align").hidden = false;
-  activate($("align"));
+  $("site-map").hidden = true;
+  activate($("setup"));
 }
 $("site-map-open").addEventListener("click", () => {
   if (typeof L === "undefined") { $("site-state").textContent = "地図の部品を読み込めませんでした"; return; }
@@ -1035,6 +1177,7 @@ $("map-cancel").addEventListener("click", closeMap);
 $("map-adopt").addEventListener("click", async () => {
   const c = siteMap.getCenter();
   siteAdopted = {latitude: c.lat, longitude: c.lng};
+  siteDirty = true;
   $("site-lat").value = c.lat.toFixed(6);
   $("site-lon").value = c.lng.toFixed(6);
   closeMap();

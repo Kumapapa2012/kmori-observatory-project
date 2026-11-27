@@ -21,7 +21,10 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; oversc
   }
 }
 /* 映像は枠ごとに縦横比を保って収める。--ar は app.js が映像の大きさから設定する */
+#app { --sheet: min(360px, 48%); --side: max(16px, env(safe-area-inset-right)); }
 #views { position: absolute; inset: 0; }
+/* 右側のパネルは停止ボタンの列の左に出し、映像はその左に寄せる */
+#app.with-sheet #views { right: calc(var(--sheet) + var(--side) + 106px); }
 .view { position: absolute; display: flex; align-items: center; justify-content: center; container-type: size; }
 .frame {
   --ar: 16 / 9;
@@ -32,20 +35,18 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; oversc
 .zoom video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .view-label {
   position: absolute; left: 6px; top: 4px; color: #f5eedd; background: #0008; padding: 1px 6px; border-radius: 4px;
-  font-size: 11px; pointer-events: none;
+  font-size: 11px; pointer-events: none; white-space: nowrap;
 }
 .view.offline .view-label::after { content: "（映像なし）"; }
-/* 大きく出している側の名前は、左上の状態パネルと重ならないよう方角の下に出す */
-#views[data-view=main] #view-main .view-label, #views[data-view=finder] #view-finder .view-label {
-  left: 50%; top: 52px; transform: translateX(-50%);
-}
+/* 大きく出している側の名前は、左上の状態パネルの下に出す */
+#views[data-view=main] #view-main .view-label, #views[data-view=finder] #view-finder .view-label { left: 12px; top: 80px; }
 
 #views[data-view=main] #view-main, #views[data-view=finder] #view-finder { inset: 0; }
 #views[data-view=split] #view-main { inset: 0 50% 0 0; }
 #views[data-view=split] #view-finder { inset: 0 0 0 50%; }
 /* ワイプはメニューの下に置き、触ると大小を入れ替える */
 #views[data-view=main] #view-finder, #views[data-view=finder] #view-main {
-  right: max(10px, env(safe-area-inset-right)); top: 58px; width: 30%; height: 30%; z-index: 2; justify-content: flex-end; align-items: flex-start;
+  right: max(10px, env(safe-area-inset-right)); top: 58px; width: 22%; height: 22%; z-index: 2; justify-content: flex-end; align-items: flex-start;
 }
 #views[data-view=main] #view-finder .frame, #views[data-view=finder] #view-main .frame { outline: 1px solid var(--frame-line); }
 #views[data-view=split] .view + .view .frame { outline: 1px solid #fff3; }
@@ -58,13 +59,9 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; oversc
 .reticle * { vector-effect: non-scaling-stroke; }
 .reticle .post { stroke-width: 2; }
 .reticle .hair { stroke-width: 1; }
+#app:not(.long-lines) .reticle .long { display: none; }
 #views.placing #view-finder .frame { cursor: crosshair; outline: 2px solid #3fc6d6; }
 
-#finder-tools {
-  left: 50%; bottom: 44px; transform: translateX(-50%); padding: 5px 5px 5px 10px;
-  display: flex; align-items: center; gap: 5px; white-space: nowrap;
-}
-#finder-tools[hidden] { display: none; }
 #finder-place.on { background: #3fc6d6; }
 
 .panel {
@@ -77,37 +74,53 @@ button {
   border-radius: 6px; padding: 6px 10px; touch-action: manipulation;
 }
 
-#status { left: var(--gutter); top: 10px; display: flex; padding: 5px 3px; }
-.state { width: 66px; display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 11px; line-height: 1.25; text-align: center; }
+#status { left: var(--gutter); top: 10px; width: 200px; padding: 5px 3px; cursor: pointer; }
+#status-icons { display: flex; }
+.state { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 11px; line-height: 1.25; text-align: center; }
 .state svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-#pointing {
-  left: 50%; top: 10px; transform: translateX(-50%); padding: 6px 14px; white-space: nowrap;
-  font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums;
-}
+#pointing { text-align: center; white-space: nowrap; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+#pointing.provisional { color: var(--warn); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 #menu { right: max(10px, env(safe-area-inset-right)); top: 10px; padding: 5px; display: flex; gap: 5px; }
 
-.dialog {
-  left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 12px 16px; width: 320px; max-width: 80%;
-  display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+/* 右側のパネル */
+.sheet {
+  right: calc(var(--side) + 106px); top: 56px; bottom: 10px; width: var(--sheet); padding: 8px 12px 12px;
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch; overflow: auto; touch-action: pan-y; font-size: 12px;
+  scrollbar-width: thin; scrollbar-color: var(--frame-line) transparent;
 }
-.dialog[hidden] { display: none; }
-.dialog .title { font-weight: 500; }
-.dialog label { display: flex; align-items: center; gap: 8px; width: 100%; }
-.dialog input[type=range] { flex: 1; min-width: 0; touch-action: none; }
-.dialog #close-camera { align-self: flex-end; }
-/* 映像を見ながら合わせるので、レティクルのある中央を隠さないよう上に寄せる */
-#camera { top: 58px; transform: translateX(-50%); }
-#camera-target { display: flex; gap: 5px; }
-#camera-target button.on { background: var(--frame-line); color: #fff; }
-#align { width: 460px; max-height: 94%; overflow: auto; touch-action: pan-y; font-size: 12px; gap: 5px; }
-#align .note { line-height: 1.35; }
-#align .row { display: flex; gap: 6px; }
-#align .site label { width: auto; flex: 1; gap: 4px; }
-#align .site input { width: 100%; min-width: 0; font: inherit; user-select: text; -webkit-user-select: text; }
+.sheet > *, .page > * { flex-shrink: 0; }
+.sheet[hidden], .modal[hidden], .page[hidden], [data-page][hidden], #reference[hidden] { display: none !important; }
+.sheet.active { z-index: 4; }
+.head { display: flex; align-items: center; justify-content: space-between; }
+.title { font-weight: 500; }
+.close { font-size: 18px; line-height: 1; padding: 4px 12px; }
+.page, #reference { display: flex; flex-direction: column; gap: 6px; }
+.row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.note { line-height: 1.35; }
+.sheet label { display: flex; align-items: center; gap: 8px; }
+.sheet input[type=range] { flex: 1; min-width: 0; touch-action: none; }
+.sheet input[type=number], .sheet input[type=text] { font: inherit; user-select: text; -webkit-user-select: text; }
+.sheet summary { cursor: pointer; padding: 3px 0; }
+.sheet table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.tabs button, #view-modes button { flex: 1; padding: 6px 4px; }
+.tabs button.on, #view-modes button.on, #camera-target button.on, #track-quick button.on,
+#focus-speeds button.on, #drawer-tabs button.on { background: var(--frame-line); color: #fff; }
+button.go { background: var(--ink); color: #fff; }
+button:disabled { opacity: .45; }
+#status-list { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; }
+#status-list dd { margin: 0; }
+#site-map {
+  left: 50%; top: 50%; transform: translate(-50%, -50%); width: 92%; height: 92%; box-sizing: border-box;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+}
+#site-map, #site-map.active { z-index: 5; }
+.site label { flex: 1; min-width: 0; flex-direction: column; align-items: stretch !important; gap: 2px !important; }
+.row.site { align-items: flex-end; }
+.site input { width: 100%; min-width: 0; box-sizing: border-box; }
+.row.site { flex-wrap: nowrap; }
 /* 観測地の地図。合わせる点は画面中央の ＋ で、地図だけを動かす */
-#site-map { width: 92%; max-width: none; height: 92%; box-sizing: border-box; padding: 8px 10px; gap: 6px; font-size: 12px; }
-#site-map .row { display: flex; gap: 6px; flex-wrap: wrap; }
 #map-center { font-variant-numeric: tabular-nums; font-size: 13px; }
 #map-area { position: relative; flex: 1; width: 100%; min-height: 0; border-radius: 6px; overflow: hidden; }
 #map { position: absolute; inset: 0; touch-action: none; background: #ddd; }
@@ -115,28 +128,17 @@ button {
 .map-cross::before, .map-cross::after { content: ""; position: absolute; background: #e00; box-shadow: 0 0 0 1px #fff; }
 .map-cross::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
 .map-cross::after { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
-#targets { border-collapse: collapse; font-variant-numeric: tabular-nums; width: 100%; }
-#targets td, #targets th { padding: 1px 6px; text-align: right; font-weight: 400; }
+#targets td, #targets th { padding: 1px 3px; text-align: right; font-weight: 400; }
 #targets td:first-child, #targets th:first-child { text-align: left; }
-
-#track { width: 460px; max-height: 94%; overflow: auto; touch-action: pan-y; font-size: 12px; gap: 6px; }
-#track .row { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; }
-#track .note { line-height: 1.35; }
 #track-quick button { padding: 4px 8px; }
-#track-quick button.on { background: var(--frame-line); color: #fff; }
-.track-query input { flex: 1; min-width: 0; font: inherit; padding: 5px; user-select: text; -webkit-user-select: text; }
+.track-query input { flex: 1; min-width: 0; padding: 5px; }
 #track-info { font-variant-numeric: tabular-nums; white-space: pre-line; }
 #track-info.error, #track-plan-text.error { color: var(--bad); }
 #track-plan { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--warn); border-radius: 6px; display: flex; flex-direction: column; gap: 6px; line-height: 1.4; }
 #track-plan[hidden] { display: none; }
 #goto-run.go { background: var(--warn); color: #fff; border-color: var(--warn); }
-#capture { width: 480px; max-height: 94%; overflow: auto; touch-action: pan-y; font-size: 12px; gap: 6px; }
-#capture .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#capture .row label { width: auto; }
-#capture .note { line-height: 1.35; }
-#capture input[type=number] { width: 58px; font: inherit; }
-#capture input[type=text] { flex: 1; min-width: 0; font: inherit; }
-#capture input { user-select: text; -webkit-user-select: text; }
+#capture input[type=number] { width: 58px; }
+#capture input[type=text] { flex: 1; min-width: 0; }
 #capture-message { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--bad); border-radius: 6px; color: var(--bad); }
 #capture-message[hidden] { display: none; }
 #capture-message-text { flex: 1; line-height: 1.35; }
@@ -144,18 +146,24 @@ button {
 #capture-list { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 #capture-list td { padding: 1px 6px 1px 0; }
 
+/* 左下の操作ドロアー。切り替えボタンは動かさず、中身をその右に出す */
+#drawer-tabs { position: absolute; left: var(--gutter); bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 4; }
+#drawer-tabs button { width: 86px; height: 42px; padding: 0; font-size: 12px; background: var(--frame); }
+#drawer-tabs button.on { background: var(--frame-line); }
 #stick {
-  left: max(16px, env(safe-area-inset-left)); bottom: 14px; width: 136px; height: 136px; border-radius: 50%;
+  left: calc(var(--gutter) + 94px); bottom: 14px; width: 136px; height: 136px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
 }
+#stick[hidden], #focus[hidden] { display: none; }
 .stick-label { position: absolute; top: 8px; width: 100%; text-align: center; font-size: 11px; pointer-events: none; }
 #knob { width: 52px; height: 52px; border-radius: 50%; background: #6b5a3a; pointer-events: none; }
 
-#notice {
-  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: 46%; text-align: center;
-  color: #f5eedd; background: #000a; padding: 3px 8px; border-radius: 6px; font-size: 12px; pointer-events: none;
-}
-#notice:empty { display: none; }
+/* 通知は最上部の中央。左の状態と右のメニューの間に収め、長い文は折り返す */
+#notice-box { position: absolute; top: 10px; left: calc(var(--gutter) + 208px); right: 232px; display: flex; justify-content: center; z-index: 6; pointer-events: none; }
+#notice { text-align: center; color: #f5eedd; background: #000a; padding: 3px 8px; border-radius: 6px; font-size: 12px; line-height: 1.35; }
+#notice:has(#notice-text:empty) { display: none; }
+#notice-action { margin-left: 8px; padding: 2px 8px; pointer-events: auto; }
+#notice-action[hidden] { display: none; }
 /* 架台との接続の切り替え。SynScan を手元で操作する間は切断にする。停止ボタンの上に置く */
 #mount-link {
   position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: 96px; z-index: 6;
@@ -171,23 +179,19 @@ button {
 }
 
 /* プレートソルブの空の範囲（円盤）と進行 */
-.sky-mask-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
-#sky-mask { width: 240px; height: 240px; touch-action: none; border-radius: 50%; }
-.sky-mask-side { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 140px; }
+.sky-mask-row { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+#sky-mask { width: 200px; height: 200px; touch-action: none; border-radius: 50%; }
+.sky-mask-side { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 108px; }
 .sky-mask-side label { width: auto; }
 .sky-mask-side input { width: 4em; }
 #plate-points td.solved { color: #7fd17f; }
 #plate-points td.failed { color: #e08a8a; }
 
-/* 映像を見ながら回すので、中央を隠さないよう下に置く */
-#focus { top: auto; bottom: 34px; transform: translateX(-50%); width: 260px; gap: 5px; padding: 6px 10px; }
-#close-focus { margin-left: auto; }
-/* 右上のメニューは幅に余裕がないので、停止ボタンの左に置く */
-#open-focus {
-  position: absolute; right: calc(max(16px, env(safe-area-inset-right)) + 106px); bottom: 14px; z-index: 4;
-  height: 40px; border-radius: 10px; background: #000a; color: #f5eedd; border: 1px solid #f5eedd66;
+#focus {
+  left: calc(var(--gutter) + 94px); bottom: 14px; width: 220px; box-sizing: border-box; padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 5px;
 }
-#focus .row { display: flex; gap: 6px; width: 100%; }
-#focus-speeds button.on { background: var(--frame-line); color: #fff; }
+#focus .row { display: flex; gap: 6px; width: 100%; flex-wrap: nowrap; }
+#focus-speeds button { flex: 1; }
 .focus-move { flex: 1; min-height: 44px; touch-action: none; }
 .focus-move.on { background: var(--frame-line); color: #fff; }

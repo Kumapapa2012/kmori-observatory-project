@@ -3,7 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <title>Observatory</title>
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head><body>
 <div id="app">
   <!-- 表示は main（主鏡が大きくファインダーがワイプ）、finder（その逆）、split（横並び） -->
@@ -14,7 +14,7 @@
         <svg class="reticle" viewBox="-100 -100 200 200" aria-hidden="true">
           <circle r="100" stroke-width="1"/>
           <path class="post" d="M0-100V-30M0 100V30M-100 0H-30M100 0H30"/>
-          <path class="hair" d="M0-30V30M-30 0H30M0-100V-5000M0 100V5000M-100 0H-5000M100 0H5000"/>
+          <path class="hair" d="M0-30V30M-30 0H30"/><path class="hair long" d="M0-100V-5000M0 100V5000M-100 0H-5000M100 0H5000"/>
         </svg>
         <span class="view-label">主鏡</span>
       </div>
@@ -25,52 +25,62 @@
         <svg class="reticle" id="finder-reticle" viewBox="-100 -100 200 200" aria-hidden="true">
           <circle r="100" stroke-width="1"/>
           <path class="post" d="M0-100V-30M0 100V30M-100 0H-30M100 0H30"/>
-          <path class="hair" d="M0-30V30M-30 0H30M0-100V-5000M0 100V5000M-100 0H-5000M100 0H5000"/>
+          <path class="hair" d="M0-30V30M-30 0H30"/><path class="hair long" d="M0-100V-5000M0 100V5000M-100 0H-5000M100 0H5000"/>
         </svg>
         <span class="view-label">ファインダー</span>
       </div>
     </div>
   </div>
 
-  <div id="status" class="panel" role="status"></div>
-  <div id="pointing" class="panel"></div>
+  <div id="status" class="panel" role="button" tabindex="0" aria-label="状態の詳細を開く">
+    <div id="status-icons" role="status"></div>
+    <div id="pointing"></div>
+  </div>
+  <div id="notice-box"><div id="notice"><span id="notice-text"></span><button id="notice-action" hidden>基準を決める</button></div></div>
   <div id="menu" class="panel">
-    <button id="view-mode">表示: 主鏡</button>
-    <button id="open-align">アライン</button>
-    <button id="open-track">追尾</button>
-    <button id="open-camera">カメラ設定</button>
+    <button id="open-track">導入</button>
     <button id="open-capture">撮影</button>
-    <button id="fullscreen">全画面</button>
+    <button id="open-camera">露出</button>
+    <button id="open-setup">準備</button>
   </div>
 
-  <div id="camera" class="panel dialog" hidden>
-    <div class="title">カメラ</div>
+  <div id="status-detail" class="panel sheet" hidden>
+    <div class="head"><span class="title">状態</span><button id="close-status" class="close" aria-label="閉じる">×</button></div>
+    <dl id="status-list"></dl>
+    <button id="fullscreen">全画面</button>
+  </div>
+  <div id="camera" class="panel sheet" hidden>
+    <div class="head"><span class="title">露出</span><button id="close-camera" class="close" aria-label="閉じる">×</button></div>
     <div class="row" id="camera-target">
       <button data-camera="camera">主鏡</button><button data-camera="finder">ファインダー</button>
     </div>
     <label><input type="checkbox" id="manual"> 手動露出</label>
     <label>露出 <input type="range" id="exposure" min="0" max="4" step="0.01"> <span id="exposure-value"></span></label>
     <label>ゲイン <input type="range" id="gain" min="0" max="128" step="1"> <span id="gain-value"></span></label>
-    <button id="close-camera">閉じる</button>
   </div>
-
-  <div id="focus" class="panel dialog" hidden>
-    <div id="focus-state" class="note"></div>
-    <div class="row" id="focus-speeds">
-      <button data-speed="fine">微動</button><button data-speed="mid">中</button><button data-speed="fast">速</button><button id="close-focus">閉じる</button>
+  <div id="setup" class="panel sheet" hidden>
+    <div class="head"><span class="title">準備</span><button id="close-setup" class="close" aria-label="閉じる">×</button></div>
+    <div class="row tabs" data-tabs="setup"><button data-tab="point">向き</button><button data-tab="sky">空の範囲</button><button data-tab="site">観測地</button><button data-tab="view">表示</button></div>
+    <div class="page" data-page="setup:point">
+      <div id="reference" hidden>
+        <div class="title">向きの基準</div>
+        <div id="reference-state"></div>
+        <div id="reference-options" class="row"></div>
+        <div id="reference-message" class="note"></div>
+      </div>
+      <div class="title">プレートソルブ（ファインダー）</div>
+      <div class="row"><button id="plate-start" class="go">アラインメント開始</button><button id="plate-cancel">中止</button></div>
+      <div id="plate-state" class="note"></div>
+      <table id="plate-points"></table>
+      <details><summary>？ 説明</summary><div class="note">空の範囲タブで指定した範囲の高度 30〜50° の 3 点へ架台が自動で動き、ファインダーの写真を ASTAP で解いて向きと傾きを求めます。</div></details>
+      <div class="title">北極星</div>
+      <div id="align-state"></div>
+      <div class="row"><button id="register">北極星を登録</button><button id="clear-align">解除</button></div>
+      <table id="targets"></table>
+      <details><summary>？ 説明</summary><div class="note">北極星を画面中央の十字に合わせてから登録します。向きを変えた直後はガタが残るので、最後は上向き、右向きに動かして合わせます。</div></details>
     </div>
-    <div class="row"><button class="focus-move" data-direction="-1">− 逆転</button><button class="focus-move" data-direction="1">＋ 正転</button></div>
-  </div>
-
-  <div id="align" class="panel dialog" hidden>
-    <div class="title">アラインメント</div>
-    <div id="align-state"></div>
-    <div class="note">北極星を画面中央の十字に合わせてから登録します。向きを変えた直後はガタが残るので、最後は上向き、右向きに動かして合わせます。</div>
-    <div class="row"><button id="register">北極星を登録</button><button id="clear-align">解除</button><button id="close-align">閉じる</button></div>
-    <table id="targets"></table>
-    <div class="title">プレートソルブ（ファインダー）</div>
-    <div class="note">見えている空を円盤の上で指でなぞります（上が北、右が東。もう一度なぞると外れます）。外側の円が地平線、内側の点線が高度の下限です。架台はこの範囲の高度 30〜50°（橙の円の間）の 3 点へ自動で動き、ファインダーの写真を ASTAP で解いて向きと傾きを求めます。</div>
-    <div class="sky-mask-row">
+    <div class="page" data-page="setup:sky">
+      <div class="sky-mask-row">
       <canvas id="sky-mask" width="240" height="240" aria-label="見えている空の範囲"></canvas>
       <div class="sky-mask-side">
         <label>高度の下限 <input type="number" id="sky-min-alt" min="0" max="70" step="5" value="20">°</label>
@@ -79,11 +89,10 @@
         <div id="sky-state" class="note"></div>
       </div>
     </div>
-    <div class="row"><button id="plate-start" class="go">アラインメント開始</button><button id="plate-cancel">中止</button></div>
-    <div id="plate-state" class="note"></div>
-    <table id="plate-points"></table>
-    <div class="title">観測地</div>
-    <div class="row site">
+      <details><summary>？ 説明</summary><div class="note">見えている空を円盤の上で指でなぞります（上が北、右が東。もう一度なぞると外れます）。外側の円が地平線、内側の点線が高度の下限です。橙の円の間が、プレートソルブで使う高度です。</div></details>
+    </div>
+    <div class="page" data-page="setup:site">
+      <div class="row site">
       <label>緯度 <input type="number" id="site-lat" step="0.000001"></label>
       <label>経度 <input type="number" id="site-lon" step="0.000001"></label>
       <label>標高 m <input type="number" id="site-elev" step="0.1"></label>
@@ -94,11 +103,18 @@
       <label>ジオイド高 m <input type="number" id="site-geoid" step="0.01"></label>
     </div>
     <div id="site-state" class="note"></div>
-    <div class="note">測ってから「地図で合わせる」で望遠鏡の位置に ＋ を合わせると、地面の標高とジオイド高は地理院から取得します。入力するのは地面から望遠鏡までの高さだけです。標高は WGS84 の楕円体高（3 つの合計）です。</div>
     <div class="row"><button id="site-measure">この端末の位置を測る</button><button id="site-map-open">地図で合わせる</button><button id="site-save">観測地を保存</button></div>
+      <details><summary>？ 説明</summary><div class="note">測ってから「地図で合わせる」で望遠鏡の位置に ＋ を合わせると、地面の標高とジオイド高は地理院から取得します。入力するのは地面から望遠鏡までの高さだけです。標高は WGS84 の楕円体高（3 つの合計）です。</div></details>
+    </div>
+    <div class="page" data-page="setup:view">
+      <div class="title">映像の並べ方</div>
+      <div class="row" id="view-modes"><button data-view="main">主鏡</button><button data-view="split">横並び</button><button data-view="finder">ファインダー</button></div>
+      <label><input type="checkbox" id="long-lines"> 十字線を画面の端まで出す</label>
+      <div class="title">ファインダー</div>
+      <div class="row" id="finder-tools"><button id="finder-zoom-button">×1</button><button id="finder-place">照準を置く</button><button id="finder-reset">中央へ</button><button id="finder-camera">露出</button></div>
+    </div>
   </div>
-
-  <div id="site-map" class="panel dialog" hidden>
+  <div id="site-map" class="panel modal" hidden>
     <div id="map-center"></div>
     <div id="map-area"><div id="map"></div><div class="map-cross"></div></div>
     <div class="note" id="map-note"></div>
@@ -107,9 +123,8 @@
       <button id="map-adopt">この位置を採用</button><button id="map-cancel">やめる</button>
     </div>
   </div>
-
-  <div id="track" class="panel dialog" hidden>
-    <div class="title">天体の導入と追尾</div>
+  <div id="track" class="panel sheet" hidden>
+    <div class="head"><span class="title">導入と追尾</span><button id="close-track" class="close" aria-label="閉じる">×</button></div>
     <div class="row" id="track-quick"></div>
     <div class="row track-query">
       <input type="text" id="track-query" placeholder="名前（M1、天王星）か 赤経 赤緯（5h34m31.9s +22°00'52&quot;）" autocomplete="off">
@@ -123,38 +138,37 @@
     <div class="row"><button id="goto-plan" disabled>自動導入の計画を見る</button></div>
     <label><input type="checkbox" id="track-guide" checked> 映像で補正する（手動露出で白飛びさせないこと）</label>
     <div class="row"><button id="track-start" disabled>この天体を追尾</button><button id="track-synscan">SynScan の追尾に戻す</button></div>
-    <div class="note">導入はアラインメント済みのときだけ使えます。直結版では導入のあとファインダーで解いて中央へ寄せ、そのまま追尾を始めます。追尾中もスティックで微調整でき、離すと追尾に戻ります（SynScan の追尾はスティックで切れるので、「SynScan の追尾に戻す」で戻します）。</div>
-    <div class="row"><button id="stop-track">追尾を止める</button><button id="close-track">閉じる</button></div>
+    <details><summary>？ 説明</summary><div class="note">導入はアラインメント済みのときだけ使えます。直結版では導入のあとファインダーで解いて中央へ寄せ、そのまま追尾を始めます。追尾中もスティックで微調整でき、離すと追尾に戻ります（SynScan の追尾はスティックで切れるので、「SynScan の追尾に戻す」で戻します）。</div></details>
+    <div class="row"><button id="stop-track">追尾を止める</button></div>
   </div>
-
-  <div id="capture" class="panel dialog" hidden>
-    <div class="title">撮影</div>
+  <div id="capture" class="panel sheet" hidden>
+    <div class="head"><span class="title">撮影</span><button id="close-capture" class="close" aria-label="閉じる">×</button></div>
     <div id="capture-state"></div>
     <div id="capture-message" hidden><span id="capture-message-text"></span><button id="capture-message-ok">OK</button></div>
     <label>対象 <input type="text" id="capture-target" maxlength="40" placeholder="例: jupiter（省略可）"></label>
-    <div class="row"><button id="shoot-still">静止画</button><span class="note">3264×2160 PNG。ライブが数秒止まります</span></div>
-    <div class="row"><button id="shoot-timelapse">タイムラプス</button><label><input type="number" id="timelapse-interval" min="5" step="1" value="5"> 秒間隔</label></div>
-    <div class="row"><button id="shoot-video">動画</button><label><input type="number" id="video-seconds" min="1" max="900" step="1" value="120"> 秒</label><span class="note">1080p 30fps 無圧縮、約 7.5GB/分</span></div>
-    <div class="note">タイムラプスと動画は手動露出で開始し、撮影中は露出を変更できません。静止画とタイムラプスの視野は 14.5'×9.6' で、1080p の 16.5'×9.3' と異なります。</div>
-    <div class="row"><button id="shoot-stop">撮影を止める</button><button id="close-capture">閉じる</button></div>
+    <div class="row tabs" data-tabs="capture"><button data-tab="still">静止画</button><button data-tab="timelapse">タイムラプス</button><button data-tab="video">動画</button></div>
+    <div class="row" data-page="capture:still"><button id="shoot-still" class="go">静止画を撮る</button><span class="note">3264×2160 PNG。ライブが数秒止まります</span></div>
+    <div class="row" data-page="capture:timelapse"><button id="shoot-timelapse" class="go">タイムラプス開始</button><label><input type="number" id="timelapse-interval" min="5" step="1" value="5"> 秒間隔</label></div>
+    <div class="row" data-page="capture:video"><button id="shoot-video" class="go">録画開始</button><label><input type="number" id="video-seconds" min="1" max="900" step="1" value="120"> 秒</label><span class="note">1080p 30fps 無圧縮、約 7.5GB/分</span></div>
+    <details><summary>？ 説明</summary><div class="note">タイムラプスと動画は手動露出で開始し、撮影中は露出を変更できません。静止画とタイムラプスの視野は 14.5'×9.6' で、1080p の 16.5'×9.3' と異なります。</div></details>
+    <div class="row"><button id="shoot-stop">撮影を止める</button></div>
     <img id="capture-preview" alt="" hidden>
     <table id="capture-list"></table>
   </div>
 
-  <div id="finder-tools" class="panel">
-    <span>ファインダー</span>
-    <button id="finder-zoom-button">×1</button>
-    <button id="finder-place">照準を置く</button>
-    <button id="finder-reset">中央へ</button>
-    <button id="finder-camera">露出</button>
+  <!-- 左下の操作ドロアー。パン/ティルトとフォーカスを切り替える。自動では格納しない -->
+  <div id="drawer-tabs"><button data-drawer="stick">パン/ティルト</button><button data-drawer="focus">フォーカス</button></div>
+  <div id="stick" class="panel" hidden><span class="stick-label">パン / ティルト</span><div id="knob"></div></div>
+  <div id="focus" class="panel" hidden>
+    <div id="focus-state" class="note"></div>
+    <div class="row" id="focus-speeds">
+      <button data-speed="fine">微動</button><button data-speed="mid">中</button><button data-speed="fast">速</button>
+    </div>
+    <div class="row"><button class="focus-move" data-direction="-1">− 逆転</button><button class="focus-move" data-direction="1">＋ 正転</button></div>
   </div>
-
-  <div id="stick" class="panel"><span class="stick-label">パン / ティルト</span><div id="knob"></div></div>
-  <div id="notice"></div>
   <button id="mount-link" class="on">架台 接続中</button>
-  <button id="open-focus">フォーカス</button>
   <button id="stop">停止</button>
 </div>
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="app.js?v=17"></script>
+<script src="app.js?v=18"></script>
 </body></html>

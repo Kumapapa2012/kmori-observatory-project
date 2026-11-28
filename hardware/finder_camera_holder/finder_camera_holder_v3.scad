@@ -11,7 +11,7 @@ PART = "all"; // ["all":印刷配置, "front", "back", "test_collar":筒だけ�
 eye_d_tip = 27.75;     // 先端の直径
 eye_d_step = 28.25;    // 段の手前の直径 (先端より太いテーパー)
 eye_len = 21;            // 先端から段まで
-fit_adj = 0;           // 内径の調整 (直径)。きつい→+0.2、ゆるい→-0.2
+fit_adj = 0.2;           // 内径の調整 (直径)。きつい→+0.2、ゆるい→-0.2
 
 /* [カメラ基板] */
 pcb = 38.0;  pcb_t = 1.6;  pitch = 28.0;
@@ -26,26 +26,32 @@ screw_d = 3.0;                  // 同: 角穴の上辺 (+y) からの深さ
 in_x = 21.8;  in_y = 19.8;      // 内側の半幅
 wall = 2.0;   front_t = 2.0;  back_t = 2.5;  corner_r = 3.0;
 
+// 設計ルール: 高さ約 5mm を超える突起は十分な厚さにするか、低くする (舌が折れたため)。
 /* [はめ込み: 爪は使わない] */
 // 前板の低い側板 (±x) の突条が、背面の壁の内側の溝にはまる。
 sk_t = 1.6;     // 側板の厚み
-sk_h = 5.5;     // 側板の高さ
+sk_h = 5.0;     // 側板の高さ
 sk_len = 28;    // 側板の長さ
 sk_gap = 0.2;   // 側板と背面の壁の隙間
 bump = 0.25;    // 締め代 (壁を押し広げる量)。固い→下げる、ゆるい→上げる
 bump_len = 12;
-bump_z = 5.5;   // 突条の頂の高さ
+bump_z = 5.0;   // 突条の頂の高さ
 
 /* [ケーブル出口] */
 // コネクタ端 → 4本線 約15 → 細い被覆 10 → 太さ 5 の部分。
-// 細い被覆を前板の舌と背面で挟む。太い部分は外に残り、抜け止めになる。
+// 細い被覆を前板の舌と背面で挟む。穴の中の突起が被覆を噛んで引き抜きを止める。
+// 太い部分は外に残り、押し込みを止める。
 sleeve_d = 4.0;        // 細い被覆の径 (実物 約4)
 sleeve_play = 0.2;     // 穴を径より大きくする量 (印刷で穴は小さくなる)
+grip = 0.2;            // 突起の食い込み (片側)。抜ける→上げる、背面が浮く→下げる
+grip_pos = [0.6, 1.5]; // 突起の位置: 壁の内面から外へ (壁 2mm の中 = 上下から挟む)
 cab_x = 9;             // コネクタから横に離し、4本線の長さを内側で使う
-cab_z = 12.8;          // 穴の中心の高さ
-tongue_w0 = 11;        // 出口の溝の幅: 前板側 (根元)
-tongue_w1 = 7;         //               穴の中心の高さ (先端)
+cab_z = 9.5;           // 穴の中心の高さ (舌の高さを抑える。基板裏面は z=6.6)
+tongue_w0 = 13;        // 出口の溝の幅: 前板側 (根元)
+tongue_w1 = 9;         //               穴の中心の高さ (先端)
 tongue_gap = 0.25;     // 舌と溝の隙間 (片側)
+tongue_t0 = 5.0;       // 舌の厚み: 根元 (壁の内面から外へ。壁 2mm より外に張り出す)
+tongue_t1 = 4.0;       //           先端
 edge_c = 0.5;          // 背面の開口の面取り (1層目のはみ出し逃げ)
 
 /* [ファインダー筒] */
@@ -64,9 +70,16 @@ col_od = eye_d_step + fit_adj + 2*col_wall;
 
 module rrect(hx, hy, h, r) linear_extrude(h) offset(r=r) square([2*(hx-r), 2*(hy-r)], center=true);
 
-module cable_hole()
-    translate([cab_x, -out_y - 1, cab_z]) rotate([-90, 0, 0])
-        cylinder(d=sleeve_d + sleeve_play, h=wall + 2);
+// 切り抜き用の形。リング状の溝を残すことで、穴の側に突起ができる
+module cable_hole() {
+    r = (sleeve_d + sleeve_play)/2;
+    translate([cab_x, -in_y, cab_z]) rotate([90, 0, 0]) difference() {   // +z = 外向き
+        translate([0, 0, -1]) cylinder(r=r, h=tongue_t0 + 2);
+        for (p = grip_pos) translate([0, 0, p]) rotate_extrude()
+            polygon([[r + 0.1, -0.4], [sleeve_d/2 - grip, -0.05],
+                     [sleeve_d/2 - grip, 0.05], [r + 0.1, 0.4]]);
+    }
+}
 
 // ---------------- 前板 (レンズ側) ----------------
 // XZ 断面を Y 方向に長さ len で押し出す
@@ -94,6 +107,18 @@ module wedge(z0, gap, ext=0) {   // ext: 切り抜くとき壁の内外にはみ
         linear_extrude(wall + 2*ext) polygon([[-h0, z0], [h0, z0], [h1, cab_z], [-h1, cab_z]]);
 }
 
+// 舌の片側の幅 (高さ z)
+function tongue_half(z) = tongue_w0/2 - tongue_gap
+    + (tongue_w0 - tongue_w1) / 2 / (cab_z - front_t) * (front_t - z);
+
+// 舌: くさび形の幅のまま、外側へ厚くする。外面は先端に向けて薄くなる
+module tongue() intersection() {
+    wedge(front_t - e, tongue_gap, tongue_t0);
+    translate([cab_x - tongue_w0, 0, 0]) rotate([90, 0, 90]) linear_extrude(2*tongue_w0) polygon([
+        [-in_y, front_t - e], [-in_y - tongue_t0, front_t - e],
+        [-in_y - tongue_t1, cab_z], [-in_y, cab_z]]);
+}
+
 module front() {
     difference() {
         union() {
@@ -108,9 +133,12 @@ module front() {
             translate([cab_x + tongue_w0/2, -in_y + 0.2, front_t - e]) cube([17 - cab_x - tongue_w0/2, 0.9, 1.8]);
             // ケーブル出口の舌 (くさび形。先端の半円で被覆を押さえる)
             difference() {
-                wedge(front_t - e, tongue_gap);
+                tongue();
                 cable_hole();
             }
+            // 舌の張り出しの下の座 (前板の外形から出る分)
+            translate([cab_x - tongue_half(0), -in_y - tongue_t0, 0])
+                cube([2*tongue_half(0), tongue_t0 - wall + corner_r, front_t]);
         }
         // レンズマウントと耳の穴
         translate([-holder_sq/2, -holder_sq/2, -1]) cube([holder_sq, holder_sq, front_t + 2]);
@@ -193,7 +221,7 @@ module pcb_mock() {
     translate([-10, -15.6, z_pcb + pcb_t]) cube([10, 5.2, 9]);   // 4 ピン + プラグ
     // 細い被覆 10 と太い部分
     translate([cab_x, -out_y, cab_z]) rotate([-90, 0, 0]) cylinder(d=sleeve_d, h=10);
-    translate([cab_x, -out_y, cab_z]) rotate([90, 0, 0]) cylinder(d=5, h=10);
+    translate([cab_x, -in_y - tongue_t0, cab_z]) rotate([90, 0, 0]) cylinder(d=5, h=10);
 }
 
 if (PART == "front") front();
